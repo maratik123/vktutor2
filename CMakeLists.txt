@@ -8,16 +8,23 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets REQUIRED)
-find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets REQUIRED)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Gui REQUIRED)
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Gui REQUIRED)
+
+add_compile_definitions(
+    QT_NO_CAST_FROM_ASCII
+    QT_NO_CAST_TO_ASCII
+    QT_NO_CAST_FROM_BYTEARRAY
+    )
 
 set(PROJECT_SOURCES
         main.cpp
-        mainwindow.cpp
-        mainwindow.h
+        mainwindow.cpp mainwindow.h
+        closeeventfilter.cpp closeeventfilter.h
+        constlatin1string.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
@@ -31,13 +38,7 @@ else()
     )
 endif()
 
-target_link_libraries(vktutor2 PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
-
-set_target_properties(vktutor2 PROPERTIES
-    MACOSX_BUNDLE_GUI_IDENTIFIER my.example.com
-    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-)
+target_link_libraries(vktutor2 PRIVATE Qt${QT_VERSION_MAJOR}::Gui)
 
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(vktutor2)

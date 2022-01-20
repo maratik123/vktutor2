@@ -1,59 +1,88 @@
 #include "closeeventfilter.h"
 #include "constlatin1string.h"
 #include "mainwindow.h"
+#include "utils.h"
 
 #include <QGuiApplication>
 #include <QDebug>
+#include <QLoggingCategory>
 #include <QSettings>
-#include <QWindow>
 #include <QVulkanInstance>
+#include <QWindow>
 
 namespace {
-constexpr ConstLatin1String geometry{"geometry"};
-constexpr ConstLatin1String windowState{"windowState"};
-constexpr int defaultWitdh = 640;
-constexpr int defaultHeight = 480;
-constexpr QRect defaultGeometry{QPoint{0, 0}, QSize{defaultWitdh, defaultHeight}};
+const QString geometry = QStringLiteral("geometry");
+const QString windowState = QStringLiteral("windowState");
+const QString mainWindow = QStringLiteral("mainWindow");
+constexpr int defaultWidth = 800;
+constexpr int defaultHeight = 600;
+constexpr QSize defaultSize{defaultWidth, defaultHeight};
+constexpr QRect defaultGeometry{QPoint{0, 0}, defaultSize};
 
-void saveSettings(const QWindow *w) {
+constexpr Qt::WindowStates filterWindowStates(Qt::WindowStates windowStates)
+{
+    return windowStates & ~(Qt::WindowActive | Qt::WindowFullScreen);
+}
+
+void saveSettings(const QWindow *w)
+{
     QSettings settings;
+    settings.beginGroup(mainWindow);
     settings.setValue(geometry, w->geometry());
-    settings.setValue(windowState, static_cast<Qt::WindowStates::Int>(w->windowStates()));
+    settings.setValue(windowState, static_cast<Qt::WindowStates::Int>(filterWindowStates(w->windowStates())));
+    settings.endGroup();
     qDebug() << "Save window settings to: " << settings.fileName();
 }
 
-void loadSettings(QWindow *w) {
+void loadSettings(QWindow *w)
+{
     QSettings settings;
     qDebug() << "Load window state from: " << settings.fileName();
+    settings.beginGroup(mainWindow);
     w->setGeometry(settings.value(geometry, defaultGeometry).toRect());
-    w->setWindowStates(static_cast<Qt::WindowStates>(settings.value(windowState, Qt::WindowNoState).toInt()));
+    w->setWindowStates(filterWindowStates(static_cast<Qt::WindowStates>(settings
+                                                                        .value(windowState, Qt::WindowNoState)
+                                                                        .toInt())));
+    settings.endGroup();
 }
 }
 
 int main(int argc, char *argv[])
 {
-    QCoreApplication::setOrganizationName(QLatin1String{"maratik"});
-    QCoreApplication::setOrganizationDomain(QLatin1String{"maratik.name"});
-    QCoreApplication::setApplicationName(QLatin1String{"vktutor2"});
+    QLoggingCategory::setFilterRules(QStringLiteral("qt.vulkan=true"));
+
+    QCoreApplication::setOrganizationName(QStringLiteral("maratik"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("maratik.name"));
+    QString applicationName = QStringLiteral("vktutor2");
+    QCoreApplication::setApplicationName(applicationName);
+
     QGuiApplication a{argc, argv};
 
     QVulkanInstance inst;
+    inst.setApiVersion(QVersionNumber{1, 0, 0});
+    if constexpr (enableValidationLayers) {
+        inst.setLayers(validationLayers);
+    }
     if (!inst.create()) {
-        qDebug() << "Vulkan is not available";
+        qDebug() << "Vulkan is not available: " << inst.errorCode();
         return 1;
     }
 
     CloseEventFilter cef;
 
     QObject::connect(&cef, &CloseEventFilter::close,
-                     &cef, [](const QObject *obj, QEvent *) {
-        saveSettings(qobject_cast<const QWindow *>(obj));
-    });
+                     &cef, [](const QObject *obj, const QEvent *) { saveSettings(qobject_cast<const QWindow *>(obj)); });
 
     MainWindow w;
+    w.setTitle(applicationName);
     w.installEventFilter(&cef);
     w.setVulkanInstance(&inst);
     loadSettings(&w);
+    w.setWidth(defaultWidth);
+    w.setHeight(defaultHeight);
+    w.setMinimumSize(defaultSize);
+    w.setMaximumSize(defaultSize);
     w.show();
+
     return QGuiApplication::exec();
 }

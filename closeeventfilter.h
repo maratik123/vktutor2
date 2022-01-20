@@ -6,6 +6,7 @@
 class CloseEventFilter : public QObject
 {
     Q_OBJECT
+
 public:
     explicit CloseEventFilter(QObject *parent = nullptr);
 

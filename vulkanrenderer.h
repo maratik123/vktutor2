@@ -21,13 +21,8 @@ public:
 
 private:
     QVulkanWindow *const m_window;
+    QVulkanInstance *const m_vkInst;
     QVulkanFunctions *const m_funcs;
-    QVulkanDeviceFunctions *m_devFuncs;
-
-    void pickPhysicalDevice();
-    void createLogicalDevice();
-    [[nodiscard]] bool isDeviceSuitable(const VkPhysicalDeviceProperties &) const;
-    [[nodiscard]] QueueFamilyIndices findQueueFamilies() const;
 };
 
 #endif // VULKANRENDERER_H

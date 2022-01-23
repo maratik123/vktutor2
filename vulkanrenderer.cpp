@@ -8,6 +8,13 @@
 #include <QDebug>
 #include <QVulkanFunctions>
 
+namespace {
+const QVector<VkFormat> colorFormat = {
+    VK_FORMAT_B8G8R8A8_SRGB,
+    VK_FORMAT_B8G8R8A8_UNORM
+};
+}
+
 VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     : m_window{w}
     , m_vkInst{m_window->vulkanInstance()}
@@ -23,6 +30,7 @@ void VulkanRenderer::startNextFrame()
 void VulkanRenderer::preInitResources()
 {
     qDebug() << "preInitResources";
+    m_window->setPreferredColorFormats(colorFormat);
     QVulkanWindowRenderer::preInitResources();
 }
 

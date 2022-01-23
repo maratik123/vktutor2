@@ -9,7 +9,7 @@ CloseEventFilter::CloseEventFilter(QObject *parent)
 
 bool CloseEventFilter::eventFilter(QObject *obj, QEvent *event)
 {
-    if (event->type() == QEvent::Close) {
+    if (event->type() == QEvent::Type::Close) {
         emit close(obj, event);
     }
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.20)
 
 project(vktutor2 VERSION 0.1 LANGUAGES CXX)
 
@@ -15,9 +15,9 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
 function(add_shader TARGET SHADER)
     find_program(GLSLC glslc)
-    set(current-shader-path ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER})
-    set(current-output-path ${CMAKE_BINARY_DIR}/shaders/${SHADER}.spv)
-    get_filename_component(current-output-dir ${current-output-path} DIRECTORY)
+    cmake_path(SET current-shader-path "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}")
+    cmake_path(SET current-output-path "${CMAKE_BINARY_DIR}/shaders/${SHADER}.spv")
+    cmake_path(GET current-output-path PARENT_PATH current-output-dir)
     file(MAKE_DIRECTORY ${current-output-dir})
     add_custom_command(
             OUTPUT ${current-output-path}
@@ -26,13 +26,16 @@ function(add_shader TARGET SHADER)
             IMPLICIT_DEPENDS CXX ${current-shader-path}
             VERBATIM)
     set_source_files_properties(${current-output-path} PROPERTIES GENERATED TRUE)
-    target_sources(${TARGET} PRIVATE ${current-output-path})
+#    target_sources(${TARGET} PRIVATE ${current-output-path})
+    set(local_targets ${${TARGET}})
+    list(APPEND local_targets ${current-output-path})
+    set(${TARGET} ${local_targets} PARENT_SCOPE)
 endfunction(add_shader)
 
 function(add_asset TARGET ASSET)
-    set(current-asset-path ${CMAKE_CURRENT_SOURCE_DIR}/${ASSET})
-    set(current-output-path ${CMAKE_BINARY_DIR}/${ASSET})
-    get_filename_component(current-output-dir ${current-output-path} DIRECTORY)
+    cmake_path(SET current-asset-path "${CMAKE_CURRENT_SOURCE_DIR}/${ASSET}")
+    cmake_path(SET current-output-path "${CMAKE_BINARY_DIR}/${ASSET}")
+    cmake_path(GET current-output-path PARENT_PATH current-output-dir)
     file(MAKE_DIRECTORY ${current-output-dir})
     add_custom_command(
             OUTPUT ${current-output-path}
@@ -42,8 +45,81 @@ function(add_asset TARGET ASSET)
     set_source_files_properties(${current-output-path} PROPERTIES
             GENERATED TRUE
             HEADER_FILE_ONLY TRUE)
-    target_sources(${TARGET} PRIVATE ${current-output-path})
+#    target_sources(${TARGET} PRIVATE ${current-output-path})
+    set(local_targets ${${TARGET}})
+    list(APPEND local_targets ${current-output-path})
+    set(${TARGET} ${local_targets} PARENT_SCOPE)
 endfunction(add_asset)
+
+function(add_resources RESOURCES TARGETS)
+    set(local_resources ${${RESOURCES}})
+    set(input_targets ${TARGETS})
+    list(REMOVE_DUPLICATES input_targets)
+    set(TARGET_DIRS)
+    foreach(it ${input_targets})
+        cmake_path(GET it PARENT_PATH TARGET_DIR)
+        list(APPEND TARGET_DIRS ${TARGET_DIR})
+    endforeach()
+    list(REMOVE_DUPLICATES TARGET_DIRS)
+    foreach(it ${TARGET_DIRS})
+        set(LOCAL_TARGETS)
+        foreach(it2 ${input_targets})
+            cmake_path(GET it2 PARENT_PATH it2_path)
+            if(it2_path STREQUAL it)
+                list(APPEND LOCAL_TARGETS ${it2})
+            endif()
+        endforeach()
+        cmake_path(SET qrc_name "${it}.qrc")
+
+        if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
+            add_custom_command(
+                OUTPUT ${qrc_name}
+                ${QT_CMAKE_EXPORT_NAMESPACE}::rcc
+                ARGS -o ${qrc_name} --project
+                WORKING_DIRECTORY ${it}
+                DEPENDS ${LOCAL_TARGETS}
+                )
+        else()
+            add_custom_command(
+                OUTPUT ${qrc_name}
+                COMMAND ${Qt5Core_RCC_EXECUTABLE}
+                ARGS -o ${qrc_name} --project
+                WORKING_DIRECTORY ${it}
+                DEPENDS ${LOCAL_TARGETS}
+                )
+        endif()
+        get_filename_component(qrc_filename ${qrc_name} NAME_WE)
+        cmake_path(SET new_dir "${it}.rcc.dir")
+        file(MAKE_DIRECTORY ${new_dir})
+        set(NEW_LOCAL_TARGETS)
+        foreach(it2 ${LOCAL_TARGETS})
+            cmake_path(GET it2 FILENAME file_local_name)
+            cmake_path(SET new_file "${new_dir}/${file_local_name}")
+            add_custom_command(
+                OUTPUT ${new_file}
+                COMMAND ${CMAKE_COMMAND} -E copy ${it2} ${new_file}
+                DEPENDS ${it2})
+            set_source_files_properties(${new_file} PROPERTIES
+                GENERATED TRUE)
+            list(APPEND NEW_LOCAL_TARGETS ${new_file})
+        endforeach()
+        cmake_path(SET qrc_new_file "${new_dir}/${qrc_filename}.qrc")
+        add_custom_command(
+                OUTPUT ${qrc_new_file}
+                COMMAND ${CMAKE_COMMAND} -E copy ${qrc_name} ${qrc_new_file}
+                DEPENDS ${qrc_name} ${NEW_LOCAL_TARGETS})
+        set_source_files_properties(${qrc_name} PROPERTIES
+            GENERATED TRUE
+            SKIP_AUTORCC ON
+            )
+        set_source_files_properties(${qrc_new_file} PROPERTIES
+            GENERATED TRUE
+            SKIP_AUTORCC ON
+            )
+        qt_add_resources(local_resources ${qrc_new_file} OPTIONS -root "/${qrc_filename}")
+    endforeach()
+    set(${RESOURCES} ${local_resources} PARENT_SCOPE)
+endfunction(add_resources)
 
 function(add_texture TARGET TEXTURE)
     add_asset(${TARGET} textures/${TEXTURE})
@@ -65,6 +141,10 @@ add_compile_definitions(
     GLM_FORCE_EXPLICIT_CTOR
     )
 
+set(resources)
+add_shader(resources shader.vert)
+add_shader(resources shader.frag)
+
 set(PROJECT_SOURCES
         main.cpp
         mainwindow.cpp mainwindow.h
@@ -74,6 +154,8 @@ set(PROJECT_SOURCES
         queuefamilyindices.cpp queuefamilyindices.h
         utils.cpp utils.h
 )
+
+add_resources(PROJECT_SOURCES "${resources}")
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(vktutor2
@@ -85,9 +167,6 @@ else()
         ${PROJECT_SOURCES}
     )
 endif()
-
-add_shader(vktutor2 shader.vert)
-add_shader(vktutor2 shader.frag)
 
 target_link_libraries(vktutor2 PRIVATE Qt${QT_VERSION_MAJOR}::Gui glm::glm)
 

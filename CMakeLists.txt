@@ -166,10 +166,12 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(vktutor2
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
+        ${GENERATED_SOURCES}
     )
 else()
     add_executable(vktutor2
         ${PROJECT_SOURCES}
+        ${GENERATED_SOURCES}
     )
 endif()
 

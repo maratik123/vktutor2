@@ -19,14 +19,14 @@ constexpr int defaultHeight = 600;
 constexpr QSize defaultSize{defaultWidth, defaultHeight};
 constexpr QRect defaultGeometry{QPoint{0, 0}, defaultSize};
 
-constexpr Qt::WindowStates filterWindowStates(Qt::WindowStates windowStates)
+[[nodiscard]] constexpr Qt::WindowStates filterWindowStates(Qt::WindowStates windowStates)
 {
     return windowStates & ~(Qt::WindowState::WindowActive | Qt::WindowState::WindowFullScreen);
 }
 
 void saveSettings(const QWindow *w)
 {
-    QSettings settings;
+    QSettings settings{};
     settings.beginGroup(mainWindow);
     settings.setValue(geometry, w->geometry());
     settings.setValue(windowState, static_cast<Qt::WindowStates::Int>(filterWindowStates(w->windowStates())));
@@ -36,7 +36,7 @@ void saveSettings(const QWindow *w)
 
 void loadSettings(QWindow *w)
 {
-    QSettings settings;
+    QSettings settings{};
     qDebug() << "Load window state from: " << settings.fileName();
     settings.beginGroup(mainWindow);
     w->setGeometry(settings.value(geometry, defaultGeometry).toRect());
@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
 
     QGuiApplication a{argc, argv};
 
-    QVulkanInstance inst;
+    QVulkanInstance inst{};
     inst.setApiVersion(QVersionNumber{1, 0, 0});
     if constexpr (enableValidationLayers) {
         inst.setLayers(validationLayers);
@@ -68,20 +68,18 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    CloseEventFilter cef;
+    CloseEventFilter cef{};
 
     QObject::connect(&cef, &CloseEventFilter::close,
                      &cef, [](const QObject *obj, const QEvent *) { saveSettings(qobject_cast<const QWindow *>(obj)); });
 
-    MainWindow w;
+    MainWindow w{};
     w.setTitle(applicationName);
     w.installEventFilter(&cef);
     w.setVulkanInstance(&inst);
-    loadSettings(&w);
     w.setWidth(defaultWidth);
     w.setHeight(defaultHeight);
-    w.setMinimumSize(defaultSize);
-    w.setMaximumSize(defaultSize);
+    loadSettings(&w);
     w.show();
 
     return QGuiApplication::exec();

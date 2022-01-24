@@ -25,8 +25,11 @@ private:
     QVulkanFunctions *const m_funcs;
     VkDevice m_device;
     QVulkanDeviceFunctions *m_devFuncs;
+    bool m_msaa;
 
-    [[nodiscard]] static QByteArray readFile(const QString &fileName);
+    VkPipelineLayout m_pipelineLayout;
+    VkPipeline m_graphicsPipeline;
+
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
     void createGraphicsPipeline();
 };

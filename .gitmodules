@@ -1,0 +1,3 @@
+[submodule "externals/scope_guard"]
+	path = externals/scope_guard
+	url = git@github.com:ricab/scope_guard.git

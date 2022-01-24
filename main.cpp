@@ -21,7 +21,7 @@ constexpr QRect defaultGeometry{QPoint{0, 0}, defaultSize};
 
 constexpr Qt::WindowStates filterWindowStates(Qt::WindowStates windowStates)
 {
-    return windowStates & ~(Qt::WindowActive | Qt::WindowFullScreen);
+    return windowStates & ~(Qt::WindowState::WindowActive | Qt::WindowState::WindowFullScreen);
 }
 
 void saveSettings(const QWindow *w)
@@ -41,7 +41,7 @@ void loadSettings(QWindow *w)
     settings.beginGroup(mainWindow);
     w->setGeometry(settings.value(geometry, defaultGeometry).toRect());
     w->setWindowStates(filterWindowStates(static_cast<Qt::WindowStates>(settings
-                                                                        .value(windowState, Qt::WindowNoState)
+                                                                        .value(windowState, Qt::WindowState::WindowNoState)
                                                                         .toInt())));
     settings.endGroup();
 }

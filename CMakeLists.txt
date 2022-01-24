@@ -20,13 +20,13 @@ function(add_shader TARGET SHADER)
     cmake_path(GET current-output-path PARENT_PATH current-output-dir)
     file(MAKE_DIRECTORY ${current-output-dir})
     add_custom_command(
-            OUTPUT ${current-output-path}
-            COMMAND ${GLSLC} -O -o ${current-output-path} ${current-shader-path}
-            DEPENDS ${current-shader-path}
-            IMPLICIT_DEPENDS CXX ${current-shader-path}
-            VERBATIM)
+        OUTPUT ${current-output-path}
+        COMMAND ${GLSLC} -O -o ${current-output-path} ${current-shader-path}
+        DEPENDS ${current-shader-path}
+        IMPLICIT_DEPENDS CXX ${current-shader-path}
+        VERBATIM
+    )
     set_source_files_properties(${current-output-path} PROPERTIES GENERATED TRUE)
-#    target_sources(${TARGET} PRIVATE ${current-output-path})
     set(local_targets ${${TARGET}})
     list(APPEND local_targets ${current-output-path})
     set(${TARGET} ${local_targets} PARENT_SCOPE)
@@ -38,14 +38,15 @@ function(add_asset TARGET ASSET)
     cmake_path(GET current-output-path PARENT_PATH current-output-dir)
     file(MAKE_DIRECTORY ${current-output-dir})
     add_custom_command(
-            OUTPUT ${current-output-path}
-            COMMAND ${CMAKE_COMMAND} -E copy ${current-asset-path} ${current-output-path}
-            DEPENDS ${current-asset-path}
-            IMPLICIT_DEPENDS CXX ${current-asset-path})
+        OUTPUT ${current-output-path}
+        COMMAND ${CMAKE_COMMAND} -E copy ${current-asset-path} ${current-output-path}
+        DEPENDS ${current-asset-path}
+        IMPLICIT_DEPENDS CXX ${current-asset-path}
+    )
     set_source_files_properties(${current-output-path} PROPERTIES
-            GENERATED TRUE
-            HEADER_FILE_ONLY TRUE)
-#    target_sources(${TARGET} PRIVATE ${current-output-path})
+        GENERATED TRUE
+        HEADER_FILE_ONLY TRUE
+    )
     set(local_targets ${${TARGET}})
     list(APPEND local_targets ${current-output-path})
     set(${TARGET} ${local_targets} PARENT_SCOPE)
@@ -78,7 +79,7 @@ function(add_resources RESOURCES TARGETS)
                 ARGS -o ${qrc_name} --project
                 WORKING_DIRECTORY ${it}
                 DEPENDS ${LOCAL_TARGETS}
-                )
+            )
         else()
             add_custom_command(
                 OUTPUT ${qrc_name}
@@ -86,7 +87,7 @@ function(add_resources RESOURCES TARGETS)
                 ARGS -o ${qrc_name} --project
                 WORKING_DIRECTORY ${it}
                 DEPENDS ${LOCAL_TARGETS}
-                )
+            )
         endif()
         get_filename_component(qrc_filename ${qrc_name} NAME_WE)
         cmake_path(SET new_dir "${it}.rcc.dir")
@@ -98,24 +99,27 @@ function(add_resources RESOURCES TARGETS)
             add_custom_command(
                 OUTPUT ${new_file}
                 COMMAND ${CMAKE_COMMAND} -E copy ${it2} ${new_file}
-                DEPENDS ${it2})
+                DEPENDS ${it2}
+            )
             set_source_files_properties(${new_file} PROPERTIES
-                GENERATED TRUE)
+                GENERATED TRUE
+            )
             list(APPEND NEW_LOCAL_TARGETS ${new_file})
         endforeach()
         cmake_path(SET qrc_new_file "${new_dir}/${qrc_filename}.qrc")
         add_custom_command(
-                OUTPUT ${qrc_new_file}
-                COMMAND ${CMAKE_COMMAND} -E copy ${qrc_name} ${qrc_new_file}
-                DEPENDS ${qrc_name} ${NEW_LOCAL_TARGETS})
+            OUTPUT ${qrc_new_file}
+            COMMAND ${CMAKE_COMMAND} -E copy ${qrc_name} ${qrc_new_file}
+            DEPENDS ${qrc_name} ${NEW_LOCAL_TARGETS}
+        )
         set_source_files_properties(${qrc_name} PROPERTIES
             GENERATED TRUE
             SKIP_AUTORCC ON
-            )
+        )
         set_source_files_properties(${qrc_new_file} PROPERTIES
             GENERATED TRUE
             SKIP_AUTORCC ON
-            )
+        )
         qt_add_resources(local_resources ${qrc_new_file} OPTIONS -root "/${qrc_filename}")
     endforeach()
     set(${RESOURCES} ${local_resources} PARENT_SCOPE)
@@ -139,23 +143,24 @@ add_compile_definitions(
     QT_NO_CAST_FROM_BYTEARRAY
     GLM_FORCE_MESSAGES
     GLM_FORCE_EXPLICIT_CTOR
-    )
+)
 
 set(resources)
 add_shader(resources shader.vert)
 add_shader(resources shader.frag)
 
 set(PROJECT_SOURCES
-        main.cpp
-        mainwindow.cpp mainwindow.h
-        closeeventfilter.cpp closeeventfilter.h
-        constlatin1string.cpp constlatin1string.h
-        vulkanrenderer.cpp vulkanrenderer.h
-        queuefamilyindices.cpp queuefamilyindices.h
-        utils.cpp utils.h
+    main.cpp
+    mainwindow.cpp mainwindow.h
+    closeeventfilter.cpp closeeventfilter.h
+    constlatin1string.cpp constlatin1string.h
+    vulkanrenderer.cpp vulkanrenderer.h
+    queuefamilyindices.cpp queuefamilyindices.h
+    utils.cpp utils.h
+    externals/scope_guard/scope_guard.hpp
 )
 
-add_resources(PROJECT_SOURCES "${resources}")
+add_resources(GENERATED_SOURCES "${resources}")
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(vktutor2

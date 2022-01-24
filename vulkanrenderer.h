@@ -3,7 +3,7 @@
 
 #include <QVulkanWindowRenderer>
 
-struct QueueFamilyIndices;
+class QFile;
 
 class VulkanRenderer : public QVulkanWindowRenderer
 {
@@ -23,6 +23,12 @@ private:
     QVulkanWindow *const m_window;
     QVulkanInstance *const m_vkInst;
     QVulkanFunctions *const m_funcs;
+    VkDevice m_device;
+    QVulkanDeviceFunctions *m_devFuncs;
+
+    [[nodiscard]] static QByteArray readFile(const QString &fileName);
+    [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
+    void createGraphicsPipeline();
 };
 
 #endif // VULKANRENDERER_H

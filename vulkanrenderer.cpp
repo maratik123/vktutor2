@@ -115,29 +115,6 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
 {
 }
 
-void VulkanRenderer::startNextFrame()
-{
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = m_window->defaultRenderPass();
-    renderPassInfo.framebuffer = m_window->currentFramebuffer();
-    renderPassInfo.renderArea = createVkRect2D(m_window->swapChainImageSize());
-    std::array<VkClearValue, 3> clearValues = createClearValues();
-    renderPassInfo.clearValueCount = m_msaa ? 3 : 2;
-    renderPassInfo.pClearValues = clearValues.data();
-    VkCommandBuffer commandBuffer = m_window->currentCommandBuffer();
-    m_devFuncs->vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
-    m_devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-
-    std::array<VkBuffer, 1> vertexBuffers{m_vertexBuffer};
-    std::array<VkDeviceSize, 1> offsets{0};
-    m_devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
-
-    m_devFuncs->vkCmdDraw(commandBuffer, vertices.size(), 1, 0, 0);
-    m_devFuncs->vkCmdEndRenderPass(commandBuffer);
-    m_window->frameReady();
-}
-
 void VulkanRenderer::preInitResources()
 {
     qDebug() << "preInitResources";
@@ -373,31 +350,61 @@ void VulkanRenderer::createVertexBuffer()
 {
     qDebug() << "Create vertex buffer";
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = sizeof(vertices);
-    bufferInfo.usage = VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bufferInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
-
-    checkVkResult(m_devFuncs->vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_vertexBuffer),
-                  "failed to create vertex buffer");
-
-    VkMemoryRequirements memRequirements{};
-    m_devFuncs->vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = m_window->hostVisibleMemoryIndex();
-    checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &m_vertexBufferMemory),
-                  "failed to allocate vertex buffer memory");
-    checkVkResult(m_devFuncs->vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0),
-                  "failed to bind vertex buffer to memory");
+    VkDeviceSize bufferSize = sizeof(vertices);
+    createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_window->hostVisibleMemoryIndex(), m_vertexBuffer, m_vertexBufferMemory);
 
     void *data{};
-    checkVkResult(m_devFuncs->vkMapMemory(m_device, m_vertexBufferMemory, 0, bufferInfo.size, {}, &data),
+    checkVkResult(m_devFuncs->vkMapMemory(m_device, m_vertexBufferMemory, 0, bufferSize, {}, &data),
                   "failed to map memory to vertex buffer");
     std::copy(vertices.cbegin(), vertices.cend(), reinterpret_cast<Vertex *>(data));
     m_devFuncs->vkUnmapMemory(m_device, m_vertexBufferMemory);
 }
 
+void VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, VkBuffer &buffer, VkDeviceMemory &bufferMemory)
+{
+    qDebug() << "Create buffer";
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
+
+    checkVkResult(m_devFuncs->vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer),
+                  "failed to create buffer");
+
+    VkMemoryRequirements memRequirements{};
+    m_devFuncs->vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = memoryTypeIndex;
+    checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory),
+                  "failed to allocate buffer memory");
+    checkVkResult(m_devFuncs->vkBindBufferMemory(m_device, buffer, bufferMemory, 0),
+                  "failed to bind vertex buffer to memory");
+}
+
+void VulkanRenderer::startNextFrame()
+{
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = m_window->defaultRenderPass();
+    renderPassInfo.framebuffer = m_window->currentFramebuffer();
+    renderPassInfo.renderArea = createVkRect2D(m_window->swapChainImageSize());
+    std::array<VkClearValue, 3> clearValues = createClearValues();
+    renderPassInfo.clearValueCount = m_msaa ? 3 : 2;
+    renderPassInfo.pClearValues = clearValues.data();
+    VkCommandBuffer commandBuffer = m_window->currentCommandBuffer();
+    m_devFuncs->vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
+    m_devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+
+    std::array<VkBuffer, 1> vertexBuffers{m_vertexBuffer};
+    std::array<VkDeviceSize, 1> offsets{0};
+    m_devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
+
+    m_devFuncs->vkCmdDraw(commandBuffer, vertices.size(), 1, 0, 0);
+    m_devFuncs->vkCmdEndRenderPass(commandBuffer);
+    m_window->frameReady();
+}

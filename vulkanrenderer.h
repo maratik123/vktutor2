@@ -36,6 +36,7 @@ private:
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
     void createGraphicsPipeline();
     void createVertexBuffer();
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, VkBuffer &buffer, VkDeviceMemory &bufferMemory);
 };
 
 #endif // VULKANRENDERER_H

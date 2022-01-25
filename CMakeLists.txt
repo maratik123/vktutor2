@@ -135,14 +135,11 @@ endfunction(add_model)
 
 find_package(QT NAMES Qt6 Qt5 COMPONENTS Gui REQUIRED)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Gui REQUIRED)
-find_package(glm REQUIRED)
 
 add_compile_definitions(
     QT_NO_CAST_FROM_ASCII
     QT_NO_CAST_TO_ASCII
     QT_NO_CAST_FROM_BYTEARRAY
-    GLM_FORCE_MESSAGES
-    GLM_FORCE_EXPLICIT_CTOR
 )
 
 set(resources)
@@ -175,7 +172,9 @@ else()
     )
 endif()
 
-target_link_libraries(vktutor2 PRIVATE Qt${QT_VERSION_MAJOR}::Gui glm::glm)
+target_link_libraries(vktutor2 PRIVATE
+    Qt${QT_VERSION_MAJOR}::Gui
+)
 
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(vktutor2)

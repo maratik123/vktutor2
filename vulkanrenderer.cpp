@@ -5,9 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <sstream>
 
 #include <QDebug>
 #include <QFile>
+#include <QVector2D>
+#include <QVector3D>
 #include <QVulkanDeviceFunctions>
 #include <QVulkanFunctions>
 
@@ -48,17 +51,67 @@ const QString fragShaderName = QStringLiteral(":/shaders/shader.frag.spv");
     };
 }
 
+struct Vertex
+{
+    QVector2D pos;
+    QVector3D color;
+
+    [[nodiscard]] static constexpr VkVertexInputBindingDescription createBindingDescription()
+    {
+        VkVertexInputBindingDescription bindingDescription{};
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = VkVertexInputRate::VK_VERTEX_INPUT_RATE_VERTEX;
+
+        return bindingDescription;
+    }
+
+    [[nodiscard]] static constexpr std::array<VkVertexInputAttributeDescription, 2> createAttributeDescriptions()
+    {
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = VkFormat::VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = VkFormat::VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
+
+constexpr std::array<Vertex, 3> vertices{
+    Vertex{QVector2D{0.0F, -0.5F}, QVector3D{1.0F, 0.0F, 0.0F}},
+    Vertex{QVector2D{0.5F, 0.5F}, QVector3D{0.0F, 1.0F, 0.0F}},
+    Vertex{QVector2D{-0.5F, 0.5F}, QVector3D{0.0F, 0.0F, 1.0F}}
+};
+
+void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult expectedResult = VkResult::VK_SUCCESS)
+{
+    if (actualResult == expectedResult) {
+        return;
+    }
+    std::ostringstream message(errorMessage, std::ios::ate);
+    message << ": " << actualResult;
+    throw std::runtime_error(message.str());
+}
 }
 
 VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     : m_window{w}
     , m_vkInst{m_window->vulkanInstance()}
     , m_funcs{m_vkInst->functions()}
+    , m_physDevice{}
     , m_device{}
     , m_devFuncs{}
+    , m_msaa{}
     , m_pipelineLayout{}
     , m_graphicsPipeline{}
-    , m_msaa{}
+    , m_vertexBuffer{}
+    , m_vertexBufferMemory{}
 {
 }
 
@@ -75,7 +128,12 @@ void VulkanRenderer::startNextFrame()
     VkCommandBuffer commandBuffer = m_window->currentCommandBuffer();
     m_devFuncs->vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
     m_devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-    m_devFuncs->vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+    std::array<VkBuffer, 1> vertexBuffers{m_vertexBuffer};
+    std::array<VkDeviceSize, 1> offsets{0};
+    m_devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
+
+    m_devFuncs->vkCmdDraw(commandBuffer, vertices.size(), 1, 0, 0);
     m_devFuncs->vkCmdEndRenderPass(commandBuffer);
     m_window->frameReady();
 }
@@ -93,6 +151,7 @@ void VulkanRenderer::preInitResources()
 void VulkanRenderer::initResources()
 {
     qDebug() << "initResources";
+    m_physDevice = m_window->physicalDevice();
     m_device = m_window->device();
     m_devFuncs = m_vkInst->deviceFunctions(m_device);
     QVulkanWindowRenderer::initResources();
@@ -102,12 +161,15 @@ void VulkanRenderer::initSwapChainResources()
 {
     qDebug() << "initSwapChainResources";
     createGraphicsPipeline();
+    createVertexBuffer();
     QVulkanWindowRenderer::initSwapChainResources();
 }
 
 void VulkanRenderer::releaseSwapChainResources()
 {
     qDebug() << "releaseSwapChainResources";
+    m_devFuncs->vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
+    m_devFuncs->vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
     m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     m_devFuncs->vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     QVulkanWindowRenderer::releaseSwapChainResources();
@@ -116,6 +178,7 @@ void VulkanRenderer::releaseSwapChainResources()
 void VulkanRenderer::releaseResources()
 {
     qDebug() << "releaseResources";
+    m_physDevice = {};
     m_devFuncs = {};
     m_device = {};
     QVulkanWindowRenderer::releaseResources();
@@ -135,19 +198,20 @@ void VulkanRenderer::logicalDeviceLost()
 
 VkShaderModule VulkanRenderer::createShaderModule(const QByteArray &code)
 {
+    qDebug() << "create shader module";
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
     createInfo.pCode = reinterpret_cast<const uint32_t *>(code.constData());
     VkShaderModule shaderModule{};
-    if (m_devFuncs->vkCreateShaderModule(m_window->device(), &createInfo, nullptr, &shaderModule) != VkResult::VK_SUCCESS) {
-        throw std::runtime_error("failed to create shader module");
-    }
+    checkVkResult(m_devFuncs->vkCreateShaderModule(m_window->device(), &createInfo, nullptr, &shaderModule),
+                  "failed to create shader module");
     return shaderModule;
 }
 
 void VulkanRenderer::createGraphicsPipeline()
 {
+    qDebug() << "Create graphics pipeline";
     VkShaderModule vertShaderModule{};
     {
         auto vertShaderCode = readFile(vertShaderName);
@@ -176,12 +240,15 @@ void VulkanRenderer::createGraphicsPipeline()
 
     std::array shaderStages{vertShaderStageInfo, fragShaderStageInfo};
 
+    auto bindingDescription = Vertex::createBindingDescription();
+    auto attributeDescriptions = Vertex::createAttributeDescriptions();
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.pVertexBindingDescriptions = nullptr;
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -278,9 +345,8 @@ void VulkanRenderer::createGraphicsPipeline()
     pipelineLayoutInfo.pSetLayouts = nullptr;
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
-    if (m_devFuncs->vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VkResult::VK_SUCCESS) {
-        throw std::runtime_error("failed to create pipeline layout");
-    }
+    checkVkResult(m_devFuncs->vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout),
+                  "failed to create pipeline layout");
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -299,7 +365,39 @@ void VulkanRenderer::createGraphicsPipeline()
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
-    if(m_devFuncs->vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline) != VkResult::VK_SUCCESS) {
-        throw std::runtime_error("failed to create graphics pipeline");
-    }
+    checkVkResult(m_devFuncs->vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline),
+                  "failed to create graphics pipeline");
 }
+
+void VulkanRenderer::createVertexBuffer()
+{
+    qDebug() << "Create vertex buffer";
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = sizeof(vertices);
+    bufferInfo.usage = VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
+
+    checkVkResult(m_devFuncs->vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_vertexBuffer),
+                  "failed to create vertex buffer");
+
+    VkMemoryRequirements memRequirements{};
+    m_devFuncs->vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = m_window->hostVisibleMemoryIndex();
+    checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &m_vertexBufferMemory),
+                  "failed to allocate vertex buffer memory");
+    checkVkResult(m_devFuncs->vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0),
+                  "failed to bind vertex buffer to memory");
+
+    void *data{};
+    checkVkResult(m_devFuncs->vkMapMemory(m_device, m_vertexBufferMemory, 0, bufferInfo.size, {}, &data),
+                  "failed to map memory to vertex buffer");
+    std::copy(vertices.cbegin(), vertices.cend(), reinterpret_cast<Vertex *>(data));
+    m_devFuncs->vkUnmapMemory(m_device, m_vertexBufferMemory);
+}
+

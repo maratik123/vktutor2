@@ -23,15 +23,19 @@ private:
     QVulkanWindow *const m_window;
     QVulkanInstance *const m_vkInst;
     QVulkanFunctions *const m_funcs;
+    VkPhysicalDevice m_physDevice;
     VkDevice m_device;
     QVulkanDeviceFunctions *m_devFuncs;
     bool m_msaa;
 
     VkPipelineLayout m_pipelineLayout;
     VkPipeline m_graphicsPipeline;
+    VkBuffer m_vertexBuffer;
+    VkDeviceMemory m_vertexBufferMemory;
 
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
     void createGraphicsPipeline();
+    void createVertexBuffer();
 };
 
 #endif // VULKANRENDERER_H

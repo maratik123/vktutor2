@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 
 project(vktutor2 VERSION 0.1 LANGUAGES CXX)
 
@@ -14,14 +14,13 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
 function(add_shader TARGET SHADER)
-    find_program(GLSLC glslc)
     cmake_path(SET current-shader-path "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}")
     cmake_path(SET current-output-path "${CMAKE_BINARY_DIR}/shaders/${SHADER}.spv")
     cmake_path(GET current-output-path PARENT_PATH current-output-dir)
     file(MAKE_DIRECTORY ${current-output-dir})
     add_custom_command(
         OUTPUT ${current-output-path}
-        COMMAND ${GLSLC} -O -o ${current-output-path} ${current-shader-path}
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} -O -o ${current-output-path} ${current-shader-path}
         DEPENDS ${current-shader-path}
         IMPLICIT_DEPENDS CXX ${current-shader-path}
         VERBATIM
@@ -133,8 +132,9 @@ function(add_model TARGET MODEL)
     add_asset(${TARGET} models/${MODEL})
 endfunction(add_model)
 
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Gui REQUIRED)
-find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Gui REQUIRED)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Gui VulkanSupport REQUIRED)
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Gui VulkanSupport REQUIRED)
+find_package(Vulkan REQUIRED)
 
 add_compile_definitions(
     QT_NO_CAST_FROM_ASCII
@@ -174,6 +174,8 @@ endif()
 
 target_link_libraries(vktutor2 PRIVATE
     Qt${QT_VERSION_MAJOR}::Gui
+    Qt${Qt_VERSION_MAJOR}::VulkanSupport
+    Vulkan::Headers
 )
 
 if(QT_VERSION_MAJOR EQUAL 6)

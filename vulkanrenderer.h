@@ -37,6 +37,7 @@ private:
     void createGraphicsPipeline();
     void createVertexBuffer();
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, VkBuffer &buffer, VkDeviceMemory &bufferMemory);
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 };
 
 #endif // VULKANRENDERER_H

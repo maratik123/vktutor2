@@ -351,13 +351,67 @@ void VulkanRenderer::createVertexBuffer()
     qDebug() << "Create vertex buffer";
 
     VkDeviceSize bufferSize = sizeof(vertices);
-    createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_window->hostVisibleMemoryIndex(), m_vertexBuffer, m_vertexBufferMemory);
+
+    VkBuffer stagingBuffer{};
+    VkDeviceMemory stagingBufferMemory{};
+    createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex(), stagingBuffer, stagingBufferMemory);
 
     void *data{};
-    checkVkResult(m_devFuncs->vkMapMemory(m_device, m_vertexBufferMemory, 0, bufferSize, {}, &data),
-                  "failed to map memory to vertex buffer");
+    checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, {}, &data),
+                  "failed to map memory to staging buffer");
     std::copy(vertices.cbegin(), vertices.cend(), reinterpret_cast<Vertex *>(data));
-    m_devFuncs->vkUnmapMemory(m_device, m_vertexBufferMemory);
+    m_devFuncs->vkUnmapMemory(m_device, stagingBufferMemory);
+
+    createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                 m_window->deviceLocalMemoryIndex(), m_vertexBuffer, m_vertexBufferMemory);
+
+    copyBuffer(stagingBuffer, m_vertexBuffer, bufferSize);
+
+    m_devFuncs->vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+    m_devFuncs->vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+}
+
+void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+{
+    VkCommandPool commandPool = m_window->graphicsCommandPool();
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VkCommandBufferLevel::VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = commandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer{};
+    checkVkResult(m_devFuncs->vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer),
+                  "failed to allocate command buffer for copy");
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    checkVkResult(m_devFuncs->vkBeginCommandBuffer(commandBuffer, &beginInfo),
+                  "failed to begin command buffer for copy");
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    m_devFuncs->vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+    checkVkResult(m_devFuncs->vkEndCommandBuffer(commandBuffer),
+                  "failed to end command buffer for copy");
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    VkQueue queue = m_window->graphicsQueue();
+    checkVkResult(m_devFuncs->vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE),
+                  "failed to submit command buffer for copy");
+    checkVkResult(m_devFuncs->vkQueueWaitIdle(queue),
+                  "failed to wait queue for copy");
+
+    m_devFuncs->vkFreeCommandBuffers(m_device, commandPool, 1, &commandBuffer);
 }
 
 void VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, VkBuffer &buffer, VkDeviceMemory &bufferMemory)

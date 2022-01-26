@@ -83,10 +83,15 @@ struct Vertex
     }
 };
 
-constexpr std::array<Vertex, 3> vertices{
-    Vertex{QVector2D{0.0F, -0.5F}, QVector3D{1.0F, 0.0F, 0.0F}},
-    Vertex{QVector2D{0.5F, 0.5F}, QVector3D{0.0F, 1.0F, 0.0F}},
-    Vertex{QVector2D{-0.5F, 0.5F}, QVector3D{0.0F, 0.0F, 1.0F}}
+constexpr std::array<Vertex, 4> vertices{
+    Vertex{QVector2D{-0.5F, -0.5F}, QVector3D{1.0F, 0.0F, 0.0F}},
+    Vertex{QVector2D{0.5F, -0.5F}, QVector3D{0.0F, 1.0F, 0.0F}},
+    Vertex{QVector2D{0.5F, 0.5F}, QVector3D{0.0F, 0.0F, 1.0F}},
+    Vertex{QVector2D{-0.5F, 0.5F}, QVector3D{1.0F, 1.0F, 1.0F}}
+};
+
+constexpr std::array<uint16_t, 6> indices{
+    0, 1, 2, 2, 3, 0
 };
 
 void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult expectedResult = VkResult::VK_SUCCESS)
@@ -112,6 +117,8 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_graphicsPipeline{}
     , m_vertexBuffer{}
     , m_vertexBufferMemory{}
+    , m_indexBuffer{}
+    , m_indexBufferMemory{}
 {
 }
 
@@ -139,12 +146,15 @@ void VulkanRenderer::initSwapChainResources()
     qDebug() << "initSwapChainResources";
     createGraphicsPipeline();
     createVertexBuffer();
+    createIndexBuffer();
     QVulkanWindowRenderer::initSwapChainResources();
 }
 
 void VulkanRenderer::releaseSwapChainResources()
 {
     qDebug() << "releaseSwapChainResources";
+    m_devFuncs->vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
+    m_devFuncs->vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
     m_devFuncs->vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
     m_devFuncs->vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
     m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
@@ -155,9 +165,9 @@ void VulkanRenderer::releaseSwapChainResources()
 void VulkanRenderer::releaseResources()
 {
     qDebug() << "releaseResources";
-    m_physDevice = {};
     m_devFuncs = {};
     m_device = {};
+    m_physDevice = {};
     QVulkanWindowRenderer::releaseResources();
 }
 
@@ -358,7 +368,7 @@ void VulkanRenderer::createVertexBuffer()
 
     void *data{};
     checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, {}, &data),
-                  "failed to map memory to staging buffer");
+                  "failed to map memory to staging vertex buffer");
     std::copy(vertices.cbegin(), vertices.cend(), reinterpret_cast<Vertex *>(data));
     m_devFuncs->vkUnmapMemory(m_device, stagingBufferMemory);
 
@@ -366,6 +376,31 @@ void VulkanRenderer::createVertexBuffer()
                  m_window->deviceLocalMemoryIndex(), m_vertexBuffer, m_vertexBufferMemory);
 
     copyBuffer(stagingBuffer, m_vertexBuffer, bufferSize);
+
+    m_devFuncs->vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+    m_devFuncs->vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+}
+
+void VulkanRenderer::createIndexBuffer()
+{
+    qDebug() << "Create index buffer";
+
+    VkDeviceSize bufferSize = sizeof(indices);
+
+    VkBuffer stagingBuffer{};
+    VkDeviceMemory stagingBufferMemory{};
+    createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex(), stagingBuffer, stagingBufferMemory);
+
+    void *data{};
+    checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, {}, &data),
+                  "failed to map memory to staging index buffer");
+    std::copy(indices.cbegin(), indices.cend(), reinterpret_cast<uint16_t *>(data));
+    m_devFuncs->vkUnmapMemory(m_device, stagingBufferMemory);
+
+    createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                 m_window->deviceLocalMemoryIndex(), m_indexBuffer, m_indexBufferMemory);
+
+    copyBuffer(stagingBuffer, m_indexBuffer, bufferSize);
 
     m_devFuncs->vkDestroyBuffer(m_device, stagingBuffer, nullptr);
     m_devFuncs->vkFreeMemory(m_device, stagingBufferMemory, nullptr);
@@ -457,8 +492,9 @@ void VulkanRenderer::startNextFrame()
     std::array<VkBuffer, 1> vertexBuffers{m_vertexBuffer};
     std::array<VkDeviceSize, 1> offsets{0};
     m_devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
+    m_devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
 
-    m_devFuncs->vkCmdDraw(commandBuffer, vertices.size(), 1, 0, 0);
+    m_devFuncs->vkCmdDrawIndexed(commandBuffer, indices.size(), 1, 0, 0, 0);
     m_devFuncs->vkCmdEndRenderPass(commandBuffer);
     m_window->frameReady();
 }

@@ -32,10 +32,13 @@ private:
     VkPipeline m_graphicsPipeline;
     VkBuffer m_vertexBuffer;
     VkDeviceMemory m_vertexBufferMemory;
+    VkBuffer m_indexBuffer;
+    VkDeviceMemory m_indexBufferMemory;
 
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
     void createGraphicsPipeline();
     void createVertexBuffer();
+    void createIndexBuffer();
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, VkBuffer &buffer, VkDeviceMemory &bufferMemory);
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 };

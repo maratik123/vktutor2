@@ -136,6 +136,10 @@ find_package(QT NAMES Qt6 Qt5 COMPONENTS Gui VulkanSupport REQUIRED)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Gui VulkanSupport REQUIRED)
 find_package(Vulkan REQUIRED)
 
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+
+
 add_compile_definitions(
     QT_NO_CAST_FROM_ASCII
     QT_NO_CAST_TO_ASCII
@@ -172,10 +176,22 @@ else()
     )
 endif()
 
+if( ipo_supported )
+    message(STATUS "IPO / LTO enabled")
+    set_property(TARGET vktutor2 PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+else()
+    message(STATUS "IPO / LTO not supported: <${ipo_error}>")
+endif()
+
 target_link_libraries(vktutor2 PRIVATE
     Qt${QT_VERSION_MAJOR}::Gui
     Qt${Qt_VERSION_MAJOR}::VulkanSupport
     Vulkan::Headers
+)
+
+target_link_options(vktutor2 PRIVATE
+    "LINKER:-O1"
+    "LINKER:--as-needed"
 )
 
 if(QT_VERSION_MAJOR EQUAL 6)

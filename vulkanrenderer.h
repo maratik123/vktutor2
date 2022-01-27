@@ -5,6 +5,11 @@
 
 class QFile;
 
+struct BufferWithMemory {
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+};
+
 class VulkanRenderer : public QVulkanWindowRenderer
 {
 public:
@@ -28,19 +33,26 @@ private:
     QVulkanDeviceFunctions *m_devFuncs;
     bool m_msaa;
 
+    VkDescriptorSetLayout m_descriptorSetLayout;
     VkPipelineLayout m_pipelineLayout;
     VkPipeline m_graphicsPipeline;
-    VkBuffer m_vertexBuffer;
-    VkDeviceMemory m_vertexBufferMemory;
-    VkBuffer m_indexBuffer;
-    VkDeviceMemory m_indexBufferMemory;
+    BufferWithMemory m_vertexBuffer;
+    BufferWithMemory m_indexBuffer;
+
+    QVector<BufferWithMemory> m_uniformBuffers;
+    VkDescriptorPool m_descriptorPool;
 
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
+    void createDescriptorSetLayout();
     void createGraphicsPipeline();
     void createVertexBuffer();
     void createIndexBuffer();
-    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, VkBuffer &buffer, VkDeviceMemory &bufferMemory);
+    void createUniformBuffers();
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, BufferWithMemory &buffer);
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+    void destroyBufferWithMemory(const BufferWithMemory &buffer);
+    void updateUniformBuffer();
+    void createDescriptorPool();
 };
 
 #endif // VULKANRENDERER_H

@@ -41,6 +41,7 @@ private:
 
     QVector<BufferWithMemory> m_uniformBuffers;
     VkDescriptorPool m_descriptorPool;
+    QVector<VkDescriptorSet> m_descriptorSets;
 
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
     void createDescriptorSetLayout();
@@ -53,6 +54,7 @@ private:
     void destroyBufferWithMemory(const BufferWithMemory &buffer);
     void updateUniformBuffer();
     void createDescriptorPool();
+    void createDescriptorSets();
 };
 
 #endif // VULKANRENDERER_H

@@ -106,10 +106,20 @@ void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult exp
     throw std::runtime_error(message.str());
 }
 
+constexpr auto sizeOfQMatrix4x4InFloats = 4 * 4;
+constexpr auto sizeOfQMatrix4x4InBytes = sizeof(float) * sizeOfQMatrix4x4InFloats;
+constexpr auto sizeOfUniformBufferObject = sizeOfQMatrix4x4InBytes * 3;
+
 struct UniformBufferObject {
     QMatrix4x4 model;
     QMatrix4x4 view;
     QMatrix4x4 proj;
+
+    void copyDataTo(float *values) const {
+        values = std::copy_n(model.constData(), sizeOfQMatrix4x4InFloats, values);
+        values = std::copy_n(view.constData(), sizeOfQMatrix4x4InFloats, values);
+        std::copy_n(proj.constData(), sizeOfQMatrix4x4InFloats, values);
+    }
 };
 }
 
@@ -128,6 +138,7 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_indexBuffer{}
     , m_descriptorPool{}
 {
+    qDebug() << "Create vulkan renderer";
 }
 
 void VulkanRenderer::preInitResources()
@@ -158,6 +169,7 @@ void VulkanRenderer::initSwapChainResources()
     createIndexBuffer();
     createUniformBuffers();
     createDescriptorPool();
+    createDescriptorSets();
     QVulkanWindowRenderer::initSwapChainResources();
 }
 
@@ -212,6 +224,8 @@ VkShaderModule VulkanRenderer::createShaderModule(const QByteArray &code)
 
 void VulkanRenderer::createDescriptorSetLayout()
 {
+    qDebug() << "Create descriptor set layout";
+
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -299,7 +313,7 @@ void VulkanRenderer::createGraphicsPipeline()
     rasterizer.polygonMode = VkPolygonMode::VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0F;
     rasterizer.cullMode = VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VkFrontFace::VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace = VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     rasterizer.depthBiasConstantFactor = 0.0F;
     rasterizer.depthBiasClamp = 0.0F;
@@ -435,19 +449,21 @@ void VulkanRenderer::createIndexBuffer()
 
 void VulkanRenderer::createUniformBuffers()
 {
-    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+    qDebug() << "Create uniform buffers";
+
     auto swapChainImageCount = m_window->swapChainImageCount();
     m_uniformBuffers.clear();
     m_uniformBuffers.reserve(swapChainImageCount);
     for (int i = 0; i < swapChainImageCount; ++i) {
         BufferWithMemory uniformBuffer{};
-        createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, m_window->hostVisibleMemoryIndex(), uniformBuffer);
+        createBuffer(sizeOfUniformBufferObject, VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, m_window->hostVisibleMemoryIndex(), uniformBuffer);
         m_uniformBuffers.append(uniformBuffer);
     }
 }
 
 void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
 {
+    qDebug() << "Copy buffer";
     VkCommandPool commandPool = m_window->graphicsCommandPool();
 
     VkCommandBufferAllocateInfo allocInfo{};
@@ -533,15 +549,20 @@ void VulkanRenderer::startNextFrame()
     std::array<VkBuffer, 1> vertexBuffers{m_vertexBuffer.buffer};
     std::array<VkDeviceSize, 1> offsets{0};
     m_devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
+
+    m_devFuncs->vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0,
+                                        1, &m_descriptorSets.at(m_window->currentSwapChainImageIndex()), 0, nullptr);
     m_devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
 
     m_devFuncs->vkCmdDrawIndexed(commandBuffer, indices.size(), 1, 0, 0, 0);
     m_devFuncs->vkCmdEndRenderPass(commandBuffer);
     m_window->frameReady();
+    m_window->requestUpdate();
 }
 
 void VulkanRenderer::destroyBufferWithMemory(const BufferWithMemory &buffer)
 {
+    qDebug() << "Destroy buffer with memory";
     m_devFuncs->vkDestroyBuffer(m_device, buffer.buffer, nullptr);
     m_devFuncs->vkFreeMemory(m_device, buffer.memory, nullptr);
 }
@@ -554,26 +575,25 @@ void VulkanRenderer::updateUniformBuffer()
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     UniformBufferObject ubo{};
-    ubo.model.setToIdentity();
-    ubo.view.setToIdentity();
-    ubo.proj.setToIdentity();
     ubo.model.rotate(time * 90.0F, 0.0F, 0.0F, 1.0F);
     ubo.view.lookAt(QVector3D{2.0F, 2.0F, 2.0F},
                     QVector3D{},
                     QVector3D{0.0F, 0.0F, 1.0F});
     auto swapChainImageSize = m_window->swapChainImageSize();
-    ubo.proj.perspective(45.0F, swapChainImageSize.width() / static_cast<float>(swapChainImageSize.height()), 0.1F, 10.0F);
+    auto ratio = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
+    ubo.proj.perspective(45.0F, ratio, 0.1F, 10.0F);
     ubo.proj(1, 1) = -ubo.proj(1, 1);
 
-    auto uniformBufferMemory = m_uniformBuffers.at(m_window->currentSwapChainImageIndex()).memory;
+    VkDeviceMemory uniformBufferMemory = m_uniformBuffers.at(m_window->currentSwapChainImageIndex()).memory;
     void *data{};
-    m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeof(ubo), {}, &data);
-    *reinterpret_cast<UniformBufferObject *>(data) = ubo;
+    m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeOfUniformBufferObject, {}, &data);
+    ubo.copyDataTo(reinterpret_cast<float *>(data));
     m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory);
 }
 
 void VulkanRenderer::createDescriptorPool()
 {
+    qDebug() << "Create descriptor pool";
     auto swapChainImageCount = m_window->swapChainImageCount();
 
     VkDescriptorPoolSize poolSize{};
@@ -587,4 +607,44 @@ void VulkanRenderer::createDescriptorPool()
     poolInfo.maxSets = swapChainImageCount;
     checkVkResult(m_devFuncs->vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool),
                   "failed to create descriptor pool");
+}
+
+void VulkanRenderer::createDescriptorSets()
+{
+    qDebug() << "Create descriptors sets";
+    auto swapChainImageCount = m_window->swapChainImageCount();
+    QVector<VkDescriptorSetLayout> layouts{swapChainImageCount, m_descriptorSetLayout};
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_descriptorPool;
+    allocInfo.descriptorSetCount = swapChainImageCount;
+    allocInfo.pSetLayouts = layouts.data();
+
+    m_descriptorSets.resize(swapChainImageCount);
+    checkVkResult(m_devFuncs->vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()),
+                  "failed to allocate descriptor sets");
+
+    {
+        const auto *iUniformBuffers = m_uniformBuffers.cbegin();
+        const auto *iDescriptorSets = m_descriptorSets.cbegin();
+        for (; iUniformBuffers != m_uniformBuffers.cend() && iDescriptorSets != m_descriptorSets.cend(); ++iUniformBuffers, ++iDescriptorSets) {
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = iUniformBuffers->buffer;
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeOfUniformBufferObject;
+
+            VkWriteDescriptorSet descriptorWrite{};
+            descriptorWrite.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = *iDescriptorSets;
+            descriptorWrite.dstBinding = 0;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pBufferInfo = &bufferInfo;
+            descriptorWrite.pImageInfo = nullptr;
+            descriptorWrite.pTexelBufferView = nullptr;
+
+            m_devFuncs->vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
+        }
+    }
 }

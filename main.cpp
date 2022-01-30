@@ -73,7 +73,11 @@ int main(int argc, char *argv[])
     QObject::connect(&cef, &CloseEventFilter::close,
                      &cef, [](const QObject *obj, const QEvent *) { saveSettings(qobject_cast<const QWindow *>(obj)); });
 
+    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    format.setColorSpace(QSurfaceFormat::ColorSpace::sRGBColorSpace);
+
     MainWindow w{};
+    w.setFormat(format);
     w.setTitle(applicationName);
     w.installEventFilter(&cef);
     w.setVulkanInstance(&inst);

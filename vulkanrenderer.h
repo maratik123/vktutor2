@@ -44,6 +44,8 @@ private:
     BufferWithMemory m_vertexBuffer;
     BufferWithMemory m_indexBuffer;
     ImageWithMemory m_textureImage;
+    VkImageView m_textureImageView;
+    VkSampler m_textureSampler;
 
     QVector<BufferWithMemory> m_uniformBuffers;
     VkDescriptorPool m_descriptorPool;
@@ -55,8 +57,8 @@ private:
     void createVertexBuffer();
     void createIndexBuffer();
     void createUniformBuffers();
-    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, BufferWithMemory &buffer) const;
-    void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex, ImageWithMemory &image) const;
+    [[nodiscard]] BufferWithMemory createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex) const;
+    [[nodiscard]] ImageWithMemory createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const;
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
     void destroyBufferWithMemory(const BufferWithMemory &buffer) const;
     void destroyImageWithMemory(const ImageWithMemory &image) const;
@@ -68,6 +70,9 @@ private:
     void endSingleTimeCommands(VkCommandBuffer commandBuffer) const;
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) const;
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) const;
+    void createTextureImageView();
+    [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format) const;
+    void createTextureSampler();
 };
 
 #endif // VULKANRENDERER_H

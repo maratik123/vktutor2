@@ -7,9 +7,6 @@
 MainWindow::MainWindow(QWindow *parent)
     : QVulkanWindow{parent}
 {
-    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
-    format.setColorSpace(QSurfaceFormat::ColorSpace::sRGBColorSpace);
-    setFormat(format);
 }
 
 QVulkanWindowRenderer *MainWindow::createRenderer()

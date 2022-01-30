@@ -61,6 +61,7 @@ struct Vertex
 {
     QVector2D pos;
     QVector3D color;
+    QVector2D texCoord;
 
     [[nodiscard]] static constexpr VkVertexInputBindingDescription createBindingDescription()
     {
@@ -72,9 +73,9 @@ struct Vertex
         return bindingDescription;
     }
 
-    [[nodiscard]] static constexpr std::array<VkVertexInputAttributeDescription, 2> createAttributeDescriptions()
+    [[nodiscard]] static constexpr std::array<VkVertexInputAttributeDescription, 3> createAttributeDescriptions()
     {
-        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
         attributeDescriptions[0].format = VkFormat::VK_FORMAT_R32G32_SFLOAT;
@@ -85,15 +86,20 @@ struct Vertex
         attributeDescriptions[1].format = VkFormat::VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
 
+        attributeDescriptions[2].binding = 0;
+        attributeDescriptions[2].location = 2;
+        attributeDescriptions[2].format = VkFormat::VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+
         return attributeDescriptions;
     }
 };
 
 constexpr std::array<Vertex, 4> vertices{
-    Vertex{QVector2D{-0.5F, -0.5F}, QVector3D{1.0F, 0.0F, 0.0F}},
-    Vertex{QVector2D{0.5F, -0.5F}, QVector3D{0.0F, 1.0F, 0.0F}},
-    Vertex{QVector2D{0.5F, 0.5F}, QVector3D{0.0F, 0.0F, 1.0F}},
-    Vertex{QVector2D{-0.5F, 0.5F}, QVector3D{1.0F, 1.0F, 1.0F}}
+    Vertex{QVector2D{-0.5F, -0.5F}, QVector3D{1.0F, 0.0F, 0.0F}, QVector2D{1.0F, 0.0F}},
+    Vertex{QVector2D{0.5F, -0.5F}, QVector3D{0.0F, 1.0F, 0.0F}, QVector2D{0.0F, 0.0F}},
+    Vertex{QVector2D{0.5F, 0.5F}, QVector3D{0.0F, 0.0F, 1.0F}, QVector2D{0.0F, 1.0F}},
+    Vertex{QVector2D{-0.5F, 0.5F}, QVector3D{1.0F, 1.0F, 1.0F}, QVector2D{1.0F, 1.0F}}
 };
 
 constexpr std::array<uint16_t, 6> indices{
@@ -255,17 +261,26 @@ void VulkanRenderer::createDescriptorSetLayout()
 {
     qDebug() << "Create descriptor set layout";
 
-    VkDescriptorSetLayoutBinding uboLayoutBinding{};
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+
+    VkDescriptorSetLayoutBinding &uboLayoutBinding = bindings[0];
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.descriptorCount = 1;
     uboLayoutBinding.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
     uboLayoutBinding.pImmutableSamplers = nullptr;
 
+    VkDescriptorSetLayoutBinding &samplerLayoutBinding = bindings[1];
+    samplerLayoutBinding.binding = 1;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+    samplerLayoutBinding.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT;
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &uboLayoutBinding;
+    layoutInfo.bindingCount = bindings.size();
+    layoutInfo.pBindings = bindings.data();
     checkVkResult(m_devFuncs->vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout),
                   "failed to create descriptor set layout");
 }
@@ -287,19 +302,19 @@ void VulkanRenderer::createGraphicsPipeline()
     }
     auto fragGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkDestroyShaderModule(m_device, fragShaderModule, nullptr); });
 
-    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
+    VkPipelineShaderStageCreateInfo &vertShaderStageInfo = shaderStages[0];
     vertShaderStageInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertShaderStageInfo.stage = VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStageInfo.module = vertShaderModule;
     vertShaderStageInfo.pName = "main";
 
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    VkPipelineShaderStageCreateInfo &fragShaderStageInfo = shaderStages[1];
     fragShaderStageInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragShaderStageInfo.stage = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT;
     fragShaderStageInfo.module = fragShaderModule;
     fragShaderStageInfo.pName = "main";
-
-    std::array shaderStages{vertShaderStageInfo, fragShaderStageInfo};
 
     auto bindingDescription = Vertex::createBindingDescription();
     auto attributeDescriptions = Vertex::createAttributeDescriptions();
@@ -567,14 +582,16 @@ void VulkanRenderer::createDescriptorPool()
     qDebug() << "Create descriptor pool";
     auto swapChainImageCount = m_window->swapChainImageCount();
 
-    VkDescriptorPoolSize poolSize{};
-    poolSize.type = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = swapChainImageCount;
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = swapChainImageCount;
+    poolSizes[1].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[1].descriptorCount = swapChainImageCount;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.poolSizeCount = poolSizes.size();
+    poolInfo.pPoolSizes = poolSizes.data();
     poolInfo.maxSets = swapChainImageCount;
     checkVkResult(m_devFuncs->vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool),
                   "failed to create descriptor pool");
@@ -604,18 +621,30 @@ void VulkanRenderer::createDescriptorSets()
             bufferInfo.offset = 0;
             bufferInfo.range = sizeof(UniformBufferObject);
 
-            VkWriteDescriptorSet descriptorWrite{};
-            descriptorWrite.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrite.dstSet = *iDescriptorSets;
-            descriptorWrite.dstBinding = 0;
-            descriptorWrite.dstArrayElement = 0;
-            descriptorWrite.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrite.descriptorCount = 1;
-            descriptorWrite.pBufferInfo = &bufferInfo;
-            descriptorWrite.pImageInfo = nullptr;
-            descriptorWrite.pTexelBufferView = nullptr;
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = m_textureImageView;
+            imageInfo.sampler = m_textureSampler;
 
-            m_devFuncs->vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+
+            descriptorWrites[0].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = *iDescriptorSets;
+            descriptorWrites[0].dstBinding = 0;
+            descriptorWrites[0].dstArrayElement = 0;
+            descriptorWrites[0].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+            descriptorWrites[1].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[1].dstSet = *iDescriptorSets;
+            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstArrayElement = 0;
+            descriptorWrites[1].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].pImageInfo = &imageInfo;
+
+            m_devFuncs->vkUpdateDescriptorSets(m_device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
         }
     }
 }

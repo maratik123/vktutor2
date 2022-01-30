@@ -149,6 +149,7 @@ add_compile_definitions(
 set(resources)
 add_shader(resources shader.vert)
 add_shader(resources shader.frag)
+add_asset(resources textures/texture.jpg)
 
 set(PROJECT_SOURCES
     main.cpp

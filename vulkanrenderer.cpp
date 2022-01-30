@@ -8,8 +8,10 @@
 #include <chrono>
 #include <sstream>
 
+#include <QColorSpace>
 #include <QDebug>
 #include <QFile>
+#include <QImage>
 #include <QMatrix4x4>
 #include <QVector2D>
 #include <QVector3D>
@@ -19,6 +21,7 @@
 namespace {
 const QString vertShaderName = QStringLiteral(":/shaders/shader.vert.spv");
 const QString fragShaderName = QStringLiteral(":/shaders/shader.frag.spv");
+const QString textureName = QStringLiteral(":/textures/texture.jpg");
 
 [[nodiscard]] QByteArray readFile(const QString &fileName)
 {
@@ -31,10 +34,11 @@ const QString fragShaderName = QStringLiteral(":/shaders/shader.frag.spv");
     return file.readAll();
 }
 
+constexpr VkClearColorValue clearColor{{0.0F, 0.0F, 0.0F, 1.0F}};
+constexpr VkClearDepthStencilValue clearDepthStencil{1.0F, 0};
+
 [[nodiscard]] constexpr std::array<VkClearValue, 3> createClearValues()
 {
-    constexpr VkClearColorValue clearColor{{0.0F, 0.0F, 0.0F, 1.0F}};
-    constexpr VkClearDepthStencilValue clearDepthStencil{1.0F, 0};
     std::array<VkClearValue, 3> clearValue{};
     clearValue[0].color = clearColor;
     clearValue[1].depthStencil = clearDepthStencil;
@@ -137,6 +141,7 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_vertexBuffer{}
     , m_indexBuffer{}
     , m_descriptorPool{}
+    , m_textureImage{}
 {
     qDebug() << "Create vulkan renderer";
 }
@@ -165,6 +170,7 @@ void VulkanRenderer::initSwapChainResources()
 {
     qDebug() << "initSwapChainResources";
     createGraphicsPipeline();
+    createTextureImage();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
@@ -182,6 +188,7 @@ void VulkanRenderer::releaseSwapChainResources()
     m_devFuncs->vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     destroyBufferWithMemory(m_indexBuffer);
     destroyBufferWithMemory(m_vertexBuffer);
+    destroyImageWithMemory(m_textureImage);
     m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     m_devFuncs->vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     QVulkanWindowRenderer::releaseSwapChainResources();
@@ -209,7 +216,7 @@ void VulkanRenderer::logicalDeviceLost()
     QVulkanWindowRenderer::logicalDeviceLost();
 }
 
-VkShaderModule VulkanRenderer::createShaderModule(const QByteArray &code)
+VkShaderModule VulkanRenderer::createShaderModule(const QByteArray &code) const
 {
     qDebug() << "create shader module";
     VkShaderModuleCreateInfo createInfo{};
@@ -322,6 +329,8 @@ void VulkanRenderer::createGraphicsPipeline()
     auto sampleCountFlagBits = m_window->sampleCountFlagBits();
 
     m_msaa = sampleCountFlagBits > VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT;
+    qDebug() << "MSAA: " << m_msaa;
+    qDebug() << "sampleCountFlagBits: " << sampleCountFlagBits;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -361,16 +370,6 @@ void VulkanRenderer::createGraphicsPipeline()
     colorBlending.pAttachments = &colorBlendAttachment;
     std::fill(std::begin(colorBlending.blendConstants), std::end(colorBlending.blendConstants), 0.0F);
 
-//    std::array dynamicStates{
-//        VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT,
-//        VkDynamicState::VK_DYNAMIC_STATE_LINE_WIDTH
-//    };
-
-//    VkPipelineDynamicStateCreateInfo dynamicState{};
-//    dynamicState.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-//    dynamicState.dynamicStateCount = dynamicStates.size();
-//    dynamicState.pDynamicStates = dynamicStates.data();
-
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
@@ -409,19 +408,20 @@ void VulkanRenderer::createVertexBuffer()
 
     BufferWithMemory stagingBuffer{};
     createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex(), stagingBuffer);
+    auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
 
     void *data{};
     checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBuffer.memory, 0, bufferSize, {}, &data),
                   "failed to map memory to staging vertex buffer");
-    std::copy(vertices.cbegin(), vertices.cend(), reinterpret_cast<Vertex *>(data));
-    m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory);
+    {
+        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
+        std::copy(vertices.cbegin(), vertices.cend(), reinterpret_cast<Vertex *>(data));
+    }
 
     createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                  m_window->deviceLocalMemoryIndex(), m_vertexBuffer);
 
     copyBuffer(stagingBuffer.buffer, m_vertexBuffer.buffer, bufferSize);
-
-    destroyBufferWithMemory(stagingBuffer);
 }
 
 void VulkanRenderer::createIndexBuffer()
@@ -432,19 +432,20 @@ void VulkanRenderer::createIndexBuffer()
 
     BufferWithMemory stagingBuffer{};
     createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex(), stagingBuffer);
+    auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
 
     void *data{};
     checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBuffer.memory, 0, bufferSize, {}, &data),
                   "failed to map memory to staging index buffer");
-    std::copy(indices.cbegin(), indices.cend(), reinterpret_cast<uint16_t *>(data));
-    m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory);
+    {
+        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
+        std::copy(indices.cbegin(), indices.cend(), reinterpret_cast<uint16_t *>(data));
+    }
 
     createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  m_window->deviceLocalMemoryIndex(), m_indexBuffer);
 
     copyBuffer(stagingBuffer.buffer, m_indexBuffer.buffer, bufferSize);
-
-    destroyBufferWithMemory(stagingBuffer);
 }
 
 void VulkanRenderer::createUniformBuffers()
@@ -461,51 +462,7 @@ void VulkanRenderer::createUniformBuffers()
     }
 }
 
-void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
-{
-    qDebug() << "Copy buffer";
-    VkCommandPool commandPool = m_window->graphicsCommandPool();
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VkCommandBufferLevel::VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer{};
-    checkVkResult(m_devFuncs->vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer),
-                  "failed to allocate command buffer for copy");
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    checkVkResult(m_devFuncs->vkBeginCommandBuffer(commandBuffer, &beginInfo),
-                  "failed to begin command buffer for copy");
-
-    VkBufferCopy copyRegion{};
-    copyRegion.srcOffset = 0;
-    copyRegion.dstOffset = 0;
-    copyRegion.size = size;
-    m_devFuncs->vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-    checkVkResult(m_devFuncs->vkEndCommandBuffer(commandBuffer),
-                  "failed to end command buffer for copy");
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    VkQueue queue = m_window->graphicsQueue();
-    checkVkResult(m_devFuncs->vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE),
-                  "failed to submit command buffer for copy");
-    checkVkResult(m_devFuncs->vkQueueWaitIdle(queue),
-                  "failed to wait queue for copy");
-
-    m_devFuncs->vkFreeCommandBuffers(m_device, commandPool, 1, &commandBuffer);
-}
-
-void VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, BufferWithMemory &buffer)
+void VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, BufferWithMemory &buffer) const
 {
     qDebug() << "Create buffer";
 
@@ -539,7 +496,7 @@ void VulkanRenderer::startNextFrame()
     renderPassInfo.renderPass = m_window->defaultRenderPass();
     renderPassInfo.framebuffer = m_window->currentFramebuffer();
     renderPassInfo.renderArea = createVkRect2D(m_window->swapChainImageSize());
-    std::array<VkClearValue, 3> clearValues = createClearValues();
+    auto clearValues = createClearValues();
     renderPassInfo.clearValueCount = m_msaa ? 3 : 2;
     renderPassInfo.pClearValues = clearValues.data();
     VkCommandBuffer commandBuffer = m_window->currentCommandBuffer();
@@ -560,14 +517,7 @@ void VulkanRenderer::startNextFrame()
     m_window->requestUpdate();
 }
 
-void VulkanRenderer::destroyBufferWithMemory(const BufferWithMemory &buffer)
-{
-    qDebug() << "Destroy buffer with memory";
-    m_devFuncs->vkDestroyBuffer(m_device, buffer.buffer, nullptr);
-    m_devFuncs->vkFreeMemory(m_device, buffer.memory, nullptr);
-}
-
-void VulkanRenderer::updateUniformBuffer()
+void VulkanRenderer::updateUniformBuffer() const
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -586,9 +536,10 @@ void VulkanRenderer::updateUniformBuffer()
 
     VkDeviceMemory uniformBufferMemory = m_uniformBuffers.at(m_window->currentSwapChainImageIndex()).memory;
     void *data{};
-    m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeOfUniformBufferObject, {}, &data);
+    checkVkResult(m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeOfUniformBufferObject, {}, &data),
+                  "failed to map uniform buffer object memory");
+    auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory); });
     ubo.copyDataTo(reinterpret_cast<float *>(data));
-    m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory);
 }
 
 void VulkanRenderer::createDescriptorPool()
@@ -647,4 +598,223 @@ void VulkanRenderer::createDescriptorSets()
             m_devFuncs->vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
         }
     }
+}
+
+void VulkanRenderer::createTextureImage()
+{
+    qDebug() << "Create texture image";
+    QImage texture = QImage{textureName}
+            .convertToFormat(QImage::Format::Format_RGB32);
+    if (texture.isNull()) {
+        throw std::runtime_error("failed to load texture image");
+    }
+    VkDeviceSize imageSize = texture.sizeInBytes();
+    auto texWidth = texture.width();
+    auto texHeight = texture.height();
+
+    BufferWithMemory stagingBuffer{};
+    createBuffer(imageSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex(), stagingBuffer);
+    auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
+
+    void *data{};
+    checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBuffer.memory, 0, imageSize, {}, &data),
+                  "failed to map texture staging buffer memory");
+    {
+        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
+        std::copy_n(static_cast<const uint8_t *>(texture.constBits()), imageSize, static_cast<uint8_t *>(data));
+    }
+
+    texture = {};
+
+    auto format = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
+
+    createImage(texWidth, texHeight, format, VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
+                VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT | VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT,
+                m_window->deviceLocalMemoryIndex(), m_textureImage);
+    transitionImageLayout(m_textureImage.image, format, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    copyBufferToImage(stagingBuffer.buffer, m_textureImage.image, texWidth, texHeight);
+    transitionImageLayout(m_textureImage.image, format, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+void VulkanRenderer::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex, ImageWithMemory &image) const
+{
+    qDebug() << "Create image";
+
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VkImageType::VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = width;
+    imageInfo.extent.height = height;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = format;
+    imageInfo.tiling = tiling;
+    imageInfo.initialLayout = VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = usage;
+    imageInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.samples = VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.flags = {};
+    checkVkResult(m_devFuncs->vkCreateImage(m_device, &imageInfo, nullptr, &image.image),
+                  "failed to create image");
+
+    VkMemoryRequirements memRequirements{};
+    m_devFuncs->vkGetImageMemoryRequirements(m_device, image.image, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = memoryTypeIndex;
+    checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &image.memory),
+                  "failed to allocate image memory");
+
+    checkVkResult(m_devFuncs->vkBindImageMemory(m_device, image.image, image.memory, 0),
+                  "failed to bind image memory");
+}
+
+void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const
+{
+    qDebug() << "Copy buffer";
+
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    auto bufferGuard = sg::make_scope_guard([&, this]{ endSingleTimeCommands(commandBuffer); });
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    m_devFuncs->vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+}
+
+void VulkanRenderer::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) const
+{
+    qDebug() << "Transition image layout";
+
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    auto bufferGuard = sg::make_scope_guard([&, this]{ endSingleTimeCommands(commandBuffer); });
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VkStructureType::VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage{};
+    VkPipelineStageFlags destinationStage{};
+
+    if (oldLayout == VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = {};
+        barrier.dstAccessMask = VkAccessFlagBits::VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        sourceStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldLayout == VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VkAccessFlagBits::VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VkAccessFlagBits::VK_ACCESS_SHADER_READ_BIT;
+
+        sourceStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        throw std::runtime_error("unsupported layout transition");
+    }
+
+    m_devFuncs->vkCmdPipelineBarrier(
+                commandBuffer,
+                sourceStage, destinationStage,
+                {},
+                0, nullptr,
+                0, nullptr,
+                1, &barrier);
+}
+
+void VulkanRenderer::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) const
+{
+    qDebug() << "Copy buffer to image";
+
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    auto bufferGuard = sg::make_scope_guard([&, this]{ endSingleTimeCommands(commandBuffer); });
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {
+        width,
+        height,
+        1
+    };
+    m_devFuncs->vkCmdCopyBufferToImage(commandBuffer, buffer, image, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+}
+
+VkCommandBuffer VulkanRenderer::beginSingleTimeCommands() const
+{
+    qDebug() << "Begin single time command";
+    VkCommandPool commandPool = m_window->graphicsCommandPool();
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VkCommandBufferLevel::VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = commandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer{};
+    checkVkResult(m_devFuncs->vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer),
+                  "failed to allocate command buffer for copy");
+    auto bufferGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkFreeCommandBuffers(m_device, commandPool, 1, &commandBuffer); });
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    checkVkResult(m_devFuncs->vkBeginCommandBuffer(commandBuffer, &beginInfo),
+                  "failed to begin command buffer for copy");
+
+    bufferGuard.dismiss();
+    return commandBuffer;
+}
+
+void VulkanRenderer::endSingleTimeCommands(VkCommandBuffer commandBuffer) const
+{
+    qDebug() << "End single time command";
+    auto bufferGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkFreeCommandBuffers(m_device, m_window->graphicsCommandPool(), 1, &commandBuffer); });
+
+    checkVkResult(m_devFuncs->vkEndCommandBuffer(commandBuffer),
+                  "failed to end command buffer for copy");
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    VkQueue queue = m_window->graphicsQueue();
+    checkVkResult(m_devFuncs->vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE),
+                  "failed to submit command buffer for copy");
+    checkVkResult(m_devFuncs->vkQueueWaitIdle(queue),
+                  "failed to wait queue for copy");
+}
+
+void VulkanRenderer::destroyBufferWithMemory(const BufferWithMemory &buffer) const
+{
+    qDebug() << "Destroy buffer with memory";
+    m_devFuncs->vkDestroyBuffer(m_device, buffer.buffer, nullptr);
+    m_devFuncs->vkFreeMemory(m_device, buffer.memory, nullptr);
+}
+
+void VulkanRenderer::destroyImageWithMemory(const ImageWithMemory &image) const
+{
+    qDebug() << "Destroy image with memory";
+    m_devFuncs->vkDestroyImage(m_device, image.image, nullptr);
+    m_devFuncs->vkFreeMemory(m_device, image.memory, nullptr);
 }

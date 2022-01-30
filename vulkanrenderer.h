@@ -10,6 +10,11 @@ struct BufferWithMemory {
     VkDeviceMemory memory;
 };
 
+struct ImageWithMemory {
+    VkImage image;
+    VkDeviceMemory memory;
+};
+
 class VulkanRenderer : public QVulkanWindowRenderer
 {
 public:
@@ -38,23 +43,31 @@ private:
     VkPipeline m_graphicsPipeline;
     BufferWithMemory m_vertexBuffer;
     BufferWithMemory m_indexBuffer;
+    ImageWithMemory m_textureImage;
 
     QVector<BufferWithMemory> m_uniformBuffers;
     VkDescriptorPool m_descriptorPool;
     QVector<VkDescriptorSet> m_descriptorSets;
 
-    [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code);
+    [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code) const;
     void createDescriptorSetLayout();
     void createGraphicsPipeline();
     void createVertexBuffer();
     void createIndexBuffer();
     void createUniformBuffers();
-    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, BufferWithMemory &buffer);
-    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-    void destroyBufferWithMemory(const BufferWithMemory &buffer);
-    void updateUniformBuffer();
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex, BufferWithMemory &buffer) const;
+    void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex, ImageWithMemory &image) const;
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
+    void destroyBufferWithMemory(const BufferWithMemory &buffer) const;
+    void destroyImageWithMemory(const ImageWithMemory &image) const;
+    void updateUniformBuffer() const;
     void createDescriptorPool();
     void createDescriptorSets();
+    void createTextureImage();
+    [[nodiscard]] VkCommandBuffer beginSingleTimeCommands() const;
+    void endSingleTimeCommands(VkCommandBuffer commandBuffer) const;
+    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) const;
+    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) const;
 };
 
 #endif // VULKANRENDERER_H

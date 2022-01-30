@@ -652,28 +652,33 @@ void VulkanRenderer::createDescriptorSets()
 void VulkanRenderer::createTextureImage()
 {
     qDebug() << "Create texture image";
-    QImage texture = QImage{textureName}
-            .convertToFormat(QImage::Format::Format_RGBX8888);
-    texture.convertToColorSpace(QColorSpace::NamedColorSpace::SRgb);
-    if (texture.isNull()) {
-        throw std::runtime_error("failed to load texture image");
-    }
-    VkDeviceSize imageSize = texture.sizeInBytes();
-    auto texWidth = texture.width();
-    auto texHeight = texture.height();
+    BufferWithMemory stagingBuffer{};
+    int texWidth{};
+    int texHeight{};
+    try {
+        QImage texture = QImage{textureName}
+                .convertToFormat(QImage::Format::Format_RGBX8888);
+        texture.convertToColorSpace(QColorSpace::NamedColorSpace::SRgb);
+        if (texture.isNull()) {
+            throw std::runtime_error("failed to load texture image");
+        }
+        VkDeviceSize imageSize = texture.sizeInBytes();
+        texWidth = texture.width();
+        texHeight = texture.height();
 
-    auto stagingBuffer = createBuffer(imageSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex());
-    auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
+        stagingBuffer = createBuffer(imageSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex());
 
-    void *data{};
-    checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBuffer.memory, 0, imageSize, {}, &data),
-                  "failed to map texture staging buffer memory");
-    {
+        void *data{};
+        checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBuffer.memory, 0, imageSize, {}, &data),
+                      "failed to map texture staging buffer memory");
         auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
         std::copy_n(static_cast<const uint8_t *>(texture.constBits()), imageSize, static_cast<uint8_t *>(data));
+    } catch (...) {
+        destroyBufferWithMemory(stagingBuffer);
+        throw;
     }
 
-    texture = {};
+    auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
 
     m_textureImage = createImage(texWidth, texHeight, textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
                      VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT | VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT,

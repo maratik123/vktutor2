@@ -102,7 +102,7 @@ struct Vertex
     }
 };
 
-const std::array<Vertex, 8> vertices{
+const std::array vertices{
     Vertex{{-0.5F, -0.5F, 0.0F}, {1.0F, 0.0F, 0.0F}, {1.0F, 0.0F}},
     Vertex{{0.5F, -0.5F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F}},
     Vertex{{0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}},
@@ -141,10 +141,25 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
-
 };
 
 constexpr VkFormat textureFormat = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
+
+constexpr bool hasStencilComponent(VkFormat format)
+{
+    return format == VkFormat::VK_FORMAT_D32_SFLOAT_S8_UINT || format == VkFormat::VK_FORMAT_D24_UNORM_S8_UINT;
+}
+
+constexpr VkImageAspectFlags evalAspectFlags(VkImageLayout newLayout, VkFormat format)
+{
+    if (newLayout != VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        return VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
+    }
+    if (!hasStencilComponent(format)) {
+        return VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+    return VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT | VkImageAspectFlagBits::VK_IMAGE_ASPECT_STENCIL_BIT;
+}
 }
 
 VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
@@ -164,8 +179,6 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_textureImage{}
     , m_textureImageView{}
     , m_textureSampler{}
-    , m_depthImage{}
-    , m_depthImageView{}
 {
     qDebug() << "Create vulkan renderer";
 }
@@ -188,6 +201,11 @@ void VulkanRenderer::initResources()
     m_device = m_window->device();
     m_devFuncs = m_vkInst->deviceFunctions(m_device);
     createDescriptorSetLayout();
+    createTextureImage();
+    createTextureImageView();
+    createTextureSampler();
+    createVertexBuffer();
+    createIndexBuffer();
     QVulkanWindowRenderer::initResources();
 }
 
@@ -196,11 +214,6 @@ void VulkanRenderer::initSwapChainResources()
     qDebug() << "initSwapChainResources";
     createGraphicsPipeline();
     createDepthResources();
-    createTextureImage();
-    createTextureImageView();
-    createTextureSampler();
-    createVertexBuffer();
-    createIndexBuffer();
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
@@ -214,11 +227,6 @@ void VulkanRenderer::releaseSwapChainResources()
         destroyBufferWithMemory(iBuffer);
     }
     m_devFuncs->vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
-    destroyBufferWithMemory(m_indexBuffer);
-    destroyBufferWithMemory(m_vertexBuffer);
-    m_devFuncs->vkDestroySampler(m_device, m_textureSampler, nullptr);
-    m_devFuncs->vkDestroyImageView(m_device, m_textureImageView, nullptr);
-    destroyImageWithMemory(m_textureImage);
     m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     m_devFuncs->vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     QVulkanWindowRenderer::releaseSwapChainResources();
@@ -227,6 +235,11 @@ void VulkanRenderer::releaseSwapChainResources()
 void VulkanRenderer::releaseResources()
 {
     qDebug() << "releaseResources";
+    destroyBufferWithMemory(m_indexBuffer);
+    destroyBufferWithMemory(m_vertexBuffer);
+    m_devFuncs->vkDestroySampler(m_device, m_textureSampler, nullptr);
+    m_devFuncs->vkDestroyImageView(m_device, m_textureImageView, nullptr);
+    destroyImageWithMemory(m_textureImage);
     m_devFuncs->vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
     m_devFuncs = {};
     m_device = {};
@@ -382,9 +395,15 @@ void VulkanRenderer::createGraphicsPipeline()
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VkCompareOp::VK_COMPARE_OP_LESS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.depthTestEnable = VK_FALSE;
+    depthStencil.minDepthBounds = 0.0F;
+    depthStencil.maxDepthBounds = 1.0F;
     depthStencil.stencilTestEnable = VK_FALSE;
+    depthStencil.front = {};
+    depthStencil.back = {};
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask =
@@ -540,8 +559,8 @@ void VulkanRenderer::startNextFrame()
     m_devFuncs->vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
     m_devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 
-    std::array<VkBuffer, 1> vertexBuffers{m_vertexBuffer.buffer};
-    std::array<VkDeviceSize, 1> offsets{0};
+    std::array vertexBuffers{m_vertexBuffer.buffer};
+    std::array offsets{static_cast<VkDeviceSize>(0)};
     m_devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
 
     m_devFuncs->vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0,
@@ -757,7 +776,8 @@ void VulkanRenderer::transitionImageLayout(VkImage image, VkFormat format, VkIma
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
+
+    barrier.subresourceRange.aspectMask = evalAspectFlags(newLayout, format);
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -778,6 +798,12 @@ void VulkanRenderer::transitionImageLayout(VkImage image, VkFormat format, VkIma
 
         sourceStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT;
         destinationStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (oldLayout == VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        barrier.srcAccessMask = {};
+        barrier.dstAccessMask = VkAccessFlagBits::VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VkAccessFlagBits::VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        sourceStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     } else {
         throw std::runtime_error("unsupported layout transition");
     }
@@ -917,7 +943,9 @@ void VulkanRenderer::createTextureSampler()
 
 void VulkanRenderer::createDepthResources()
 {
-
+    qDebug() << "Create depth resources";
+    transitionImageLayout(m_window->depthStencilImage(), m_window->depthStencilFormat(),
+                          VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 }
 
 void VulkanRenderer::destroyBufferWithMemory(const BufferWithMemory &buffer) const

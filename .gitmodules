@@ -1,3 +1,6 @@
 [submodule "externals/scope_guard"]
 	path = externals/scope_guard
 	url = git@github.com:ricab/scope_guard.git
+[submodule "externals/tinyobjloader"]
+	path = externals/tinyobjloader
+	url = git@github.com:tinyobjloader/tinyobjloader.git

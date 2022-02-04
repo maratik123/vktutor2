@@ -46,6 +46,8 @@ private:
     ImageWithMemory m_textureImage;
     VkImageView m_textureImageView;
     VkSampler m_textureSampler;
+    ImageWithMemory m_depthImage;
+    VkImageView m_depthImageView;
 
     QVector<BufferWithMemory> m_uniformBuffers;
     VkDescriptorPool m_descriptorPool;
@@ -73,6 +75,7 @@ private:
     void createTextureImageView();
     [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format) const;
     void createTextureSampler();
+    void createDepthResources();
 };
 
 #endif // VULKANRENDERER_H

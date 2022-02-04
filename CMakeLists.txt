@@ -135,6 +135,7 @@ endfunction(add_model)
 find_package(QT NAMES Qt6 Qt5 COMPONENTS Gui VulkanSupport REQUIRED)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Gui VulkanSupport REQUIRED)
 find_package(Vulkan REQUIRED)
+find_package(glm REQUIRED)
 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
@@ -188,6 +189,7 @@ target_link_libraries(vktutor2 PRIVATE
     Qt${QT_VERSION_MAJOR}::Gui
     Qt${Qt_VERSION_MAJOR}::VulkanSupport
     Vulkan::Headers
+    glm::glm
 )
 
 target_link_options(vktutor2 PRIVATE

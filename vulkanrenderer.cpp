@@ -8,13 +8,20 @@
 #include <chrono>
 #include <string>
 
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+#define GLM_FORCE_INTRINSICS
+#define GLM_FORCE_EXPLICIT_CTOR
+#include <glm/mat4x4.hpp>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <QColorSpace>
 #include <QDebug>
 #include <QFile>
 #include <QImage>
-#include <QMatrix4x4>
-#include <QVector2D>
-#include <QVector3D>
 #include <QVulkanDeviceFunctions>
 #include <QVulkanFunctions>
 
@@ -59,9 +66,9 @@ constexpr VkClearDepthStencilValue clearDepthStencil{1.0F, 0};
 
 struct Vertex
 {
-    QVector3D pos;
-    QVector3D color;
-    QVector2D texCoord;
+    glm::vec3 pos;
+    glm::vec3 color;
+    glm::vec2 texCoord;
 
     [[nodiscard]] static constexpr VkVertexInputBindingDescription createBindingDescription()
     {
@@ -95,15 +102,21 @@ struct Vertex
     }
 };
 
-constexpr std::array<Vertex, 4> vertices{
-    Vertex{QVector3D{-0.5F, -0.5F, 0.0F}, QVector3D{1.0F, 0.0F, 0.0F}, QVector2D{1.0F, 0.0F}},
-    Vertex{QVector3D{0.5F, -0.5F, 0.0F}, QVector3D{0.0F, 1.0F, 0.0F}, QVector2D{0.0F, 0.0F}},
-    Vertex{QVector3D{0.5F, 0.5F, 0.0F}, QVector3D{0.0F, 0.0F, 1.0F}, QVector2D{0.0F, 1.0F}},
-    Vertex{QVector3D{-0.5F, 0.5F, 0.0F}, QVector3D{1.0F, 1.0F, 1.0F}, QVector2D{1.0F, 1.0F}}
+const std::array<Vertex, 8> vertices{
+    Vertex{{-0.5F, -0.5F, 0.0F}, {1.0F, 0.0F, 0.0F}, {1.0F, 0.0F}},
+    Vertex{{0.5F, -0.5F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F}},
+    Vertex{{0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}},
+    Vertex{{-0.5F, 0.5F, 0.0F}, {1.0F, 1.0F, 1.0F}, {1.0F, 1.0F}},
+
+    Vertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 0.0F, 0.0F}, {1.0F, 0.0F}},
+    Vertex{{0.5F, -0.5F, -0.5F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F}},
+    Vertex{{0.5F, 0.5F, -0.5F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}},
+    Vertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 1.0F}}
 };
 
-constexpr std::array<uint16_t, 6> indices{
-    0, 1, 2, 2, 3, 0
+constexpr std::array<uint16_t, 12> indices{
+    0, 1, 2, 2, 3, 0,
+    4, 5, 6, 6, 7, 4
 };
 
 [[noreturn]] void throwErrorMessage(VkResult actualResult, const char *errorMessage, VkResult expectedResult)
@@ -124,25 +137,11 @@ void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult exp
     throwErrorMessage(actualResult, errorMessage, expectedResult);
 }
 
-constexpr auto sizeOfQMatrix4x4InFloats = 4 * 4;
-
 struct UniformBufferObject {
-    alignas(16) std::array<float, sizeOfQMatrix4x4InFloats> model;
-    alignas(16) std::array<float, sizeOfQMatrix4x4InFloats> view;
-    alignas(16) std::array<float, sizeOfQMatrix4x4InFloats> proj;
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 view;
+    alignas(16) glm::mat4 proj;
 
-};
-
-struct MVPTranform {
-    QMatrix4x4 model;
-    QMatrix4x4 view;
-    QMatrix4x4 proj;
-
-    void copyDataTo(UniformBufferObject &values) const {
-        std::copy_n(model.constData(), sizeOfQMatrix4x4InFloats, values.model.begin());
-        std::copy_n(view.constData(), sizeOfQMatrix4x4InFloats, values.view.begin());
-        std::copy_n(proj.constData(), sizeOfQMatrix4x4InFloats, values.proj.begin());
-    }
 };
 
 constexpr VkFormat textureFormat = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
@@ -165,6 +164,8 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_textureImage{}
     , m_textureImageView{}
     , m_textureSampler{}
+    , m_depthImage{}
+    , m_depthImageView{}
 {
     qDebug() << "Create vulkan renderer";
 }
@@ -194,6 +195,7 @@ void VulkanRenderer::initSwapChainResources()
 {
     qDebug() << "initSwapChainResources";
     createGraphicsPipeline();
+    createDepthResources();
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
@@ -559,22 +561,22 @@ void VulkanRenderer::updateUniformBuffer() const
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-    MVPTranform mvp{};
-    mvp.model.rotate(time * 90.0F, 0.0F, 0.0F, 1.0F);
-    mvp.view.lookAt(QVector3D{2.0F, 2.0F, 2.0F},
-                    QVector3D{},
-                    QVector3D{0.0F, 0.0F, 1.0F});
     auto swapChainImageSize = m_window->swapChainImageSize();
     auto ratio = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
-    mvp.proj.perspective(45.0F, ratio, 0.1F, 10.0F);
-    mvp.proj(1, 1) = -mvp.proj(1, 1);
 
     VkDeviceMemory uniformBufferMemory = m_uniformBuffers.at(m_window->currentSwapChainImageIndex()).memory;
+
     void *data{};
+
     checkVkResult(m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeof(UniformBufferObject), {}, &data),
                   "failed to map uniform buffer object memory");
     auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory); });
-    mvp.copyDataTo(*reinterpret_cast<UniformBufferObject *>(data));
+
+    UniformBufferObject &ubo = *reinterpret_cast<UniformBufferObject *>(data);
+    ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(90.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+    ubo.view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F});
+    ubo.proj = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
+    ubo.proj[1][1] = -ubo.proj[1][1];
 }
 
 void VulkanRenderer::createDescriptorPool()
@@ -827,17 +829,19 @@ VkCommandBuffer VulkanRenderer::beginSingleTimeCommands() const
     VkCommandBuffer commandBuffer{};
     checkVkResult(m_devFuncs->vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer),
                   "failed to allocate command buffer for copy");
-    auto bufferGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkFreeCommandBuffers(m_device, commandPool, 1, &commandBuffer); });
+    try {
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        checkVkResult(m_devFuncs->vkBeginCommandBuffer(commandBuffer, &beginInfo),
+                      "failed to begin command buffer for copy");
 
-    checkVkResult(m_devFuncs->vkBeginCommandBuffer(commandBuffer, &beginInfo),
-                  "failed to begin command buffer for copy");
-
-    bufferGuard.dismiss();
-    return commandBuffer;
+        return commandBuffer;
+    } catch(...) {
+        m_devFuncs->vkFreeCommandBuffers(m_device, commandPool, 1, &commandBuffer);
+        throw;
+    }
 }
 
 void VulkanRenderer::endSingleTimeCommands(VkCommandBuffer commandBuffer) const
@@ -909,6 +913,11 @@ void VulkanRenderer::createTextureSampler()
     samplerInfo.maxLod = 0.0F;
     checkVkResult(m_devFuncs->vkCreateSampler(m_device, &samplerInfo, nullptr, &m_textureSampler),
                   "failed to create texture sampler");
+}
+
+void VulkanRenderer::createDepthResources()
+{
+
 }
 
 void VulkanRenderer::destroyBufferWithMemory(const BufferWithMemory &buffer) const

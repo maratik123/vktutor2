@@ -59,7 +59,7 @@ constexpr VkClearDepthStencilValue clearDepthStencil{1.0F, 0};
 
 struct Vertex
 {
-    QVector2D pos;
+    QVector3D pos;
     QVector3D color;
     QVector2D texCoord;
 
@@ -78,7 +78,7 @@ struct Vertex
         std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VkFormat::VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].format = VkFormat::VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
         attributeDescriptions[1].binding = 0;
@@ -96,10 +96,10 @@ struct Vertex
 };
 
 constexpr std::array<Vertex, 4> vertices{
-    Vertex{QVector2D{-0.5F, -0.5F}, QVector3D{1.0F, 0.0F, 0.0F}, QVector2D{1.0F, 0.0F}},
-    Vertex{QVector2D{0.5F, -0.5F}, QVector3D{0.0F, 1.0F, 0.0F}, QVector2D{0.0F, 0.0F}},
-    Vertex{QVector2D{0.5F, 0.5F}, QVector3D{0.0F, 0.0F, 1.0F}, QVector2D{0.0F, 1.0F}},
-    Vertex{QVector2D{-0.5F, 0.5F}, QVector3D{1.0F, 1.0F, 1.0F}, QVector2D{1.0F, 1.0F}}
+    Vertex{QVector3D{-0.5F, -0.5F, 0.0F}, QVector3D{1.0F, 0.0F, 0.0F}, QVector2D{1.0F, 0.0F}},
+    Vertex{QVector3D{0.5F, -0.5F, 0.0F}, QVector3D{0.0F, 1.0F, 0.0F}, QVector2D{0.0F, 0.0F}},
+    Vertex{QVector3D{0.5F, 0.5F, 0.0F}, QVector3D{0.0F, 0.0F, 1.0F}, QVector2D{0.0F, 1.0F}},
+    Vertex{QVector3D{-0.5F, 0.5F, 0.0F}, QVector3D{1.0F, 1.0F, 1.0F}, QVector2D{1.0F, 1.0F}}
 };
 
 constexpr std::array<uint16_t, 6> indices{

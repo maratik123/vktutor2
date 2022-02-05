@@ -133,6 +133,7 @@ void VulkanRenderer::preInitResources()
             VkFormat::VK_FORMAT_B8G8R8A8_UNORM
     });
     loadModel();
+    m_window->setSampleCount(m_window->supportedSampleCounts().last());
     QVulkanWindowRenderer::preInitResources();
 }
 
@@ -650,11 +651,12 @@ void VulkanRenderer::createTextureImage()
 
     auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
 
-    m_textureImage = createImage(texWidth, texHeight, m_mipLevels, textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
-                     static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-                     | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                     | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT),
-                     m_window->deviceLocalMemoryIndex());
+    m_textureImage = createImage(texWidth, texHeight, m_mipLevels, VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+                                 textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
+                                 static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                                 | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+                                 | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT),
+                                 m_window->deviceLocalMemoryIndex());
     transitionImageLayout(m_textureImage.image, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_mipLevels);
     copyBufferToImage(stagingBuffer.buffer, m_textureImage.image, texWidth, texHeight);
     generateMipmaps(m_textureImage.image, textureFormat, texWidth, texHeight, m_mipLevels);
@@ -757,7 +759,8 @@ void VulkanRenderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_
                                      1, &barrier);
 }
 
-ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const
+ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
+                                            VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const
 {
     qDebug() << "Create image";
 
@@ -774,7 +777,7 @@ ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, uin
     imageInfo.initialLayout = VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = usage;
     imageInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.samples = numSamples;
     imageInfo.flags = {};
     VkImage image{};
     checkVkResult(m_devFuncs->vkCreateImage(m_device, &imageInfo, nullptr, &image),

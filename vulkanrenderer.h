@@ -43,6 +43,7 @@ private:
     VkPipeline m_graphicsPipeline;
     BufferWithMemory m_vertexBuffer;
     BufferWithMemory m_indexBuffer;
+    uint32_t m_mipLevels;
     ImageWithMemory m_textureImage;
     VkImageView m_textureImageView;
     VkSampler m_textureSampler;
@@ -57,27 +58,41 @@ private:
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code) const;
     void createDescriptorSetLayout();
     void createGraphicsPipeline();
-    void createVertexBuffer();
-    void createIndexBuffer();
-    void createUniformBuffers();
-    [[nodiscard]] BufferWithMemory createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex) const;
-    [[nodiscard]] ImageWithMemory createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const;
-    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
-    void destroyBufferWithMemory(const BufferWithMemory &buffer) const;
-    void destroyImageWithMemory(const ImageWithMemory &image) const;
-    void updateUniformBuffer() const;
     void createDescriptorPool();
     void createDescriptorSets();
+
+    void loadModel();
+
+    void createVertexBuffer();
+    void createIndexBuffer();
+
+    void createUniformBuffers();
+
     void createTextureImage();
+    void createTextureImageView();
+    void createTextureSampler();
+
+    void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) const;
+
+    void createDepthResources() const;
+
+    [[nodiscard]] BufferWithMemory createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex) const;
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
+
+    [[nodiscard]] ImageWithMemory createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const;
+    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) const;
+    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) const;
+
+    [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format, uint32_t mipLevels) const;
+
     [[nodiscard]] VkCommandBuffer beginSingleTimeCommands() const;
     void endSingleTimeCommands(VkCommandBuffer commandBuffer) const;
-    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) const;
-    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) const;
-    void createTextureImageView();
-    [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format) const;
-    void createTextureSampler();
-    void createDepthResources() const;
-    void loadModel();
+
+
+    void updateUniformBuffer() const;
+
+    void destroyBufferWithMemory(BufferWithMemory &buffer) const;
+    void destroyImageWithMemory(ImageWithMemory &image) const;
 };
 
 #endif // VULKANRENDERER_H

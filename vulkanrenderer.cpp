@@ -120,6 +120,7 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_textureImage{}
     , m_textureImageView{}
     , m_textureSampler{}
+    , m_mipLevels{}
 {
     qDebug() << "Create vulkan renderer";
 }
@@ -131,7 +132,7 @@ void VulkanRenderer::preInitResources()
             VkFormat::VK_FORMAT_B8G8R8A8_SRGB,
             VkFormat::VK_FORMAT_B8G8R8A8_UNORM
     });
-    m_window->setPhysicalDeviceIndex(0);
+    loadModel();
     QVulkanWindowRenderer::preInitResources();
 }
 
@@ -145,7 +146,6 @@ void VulkanRenderer::initResources()
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
-    loadModel();
     createVertexBuffer();
     createIndexBuffer();
     QVulkanWindowRenderer::initResources();
@@ -169,8 +169,11 @@ void VulkanRenderer::releaseSwapChainResources()
         destroyBufferWithMemory(iBuffer);
     }
     m_devFuncs->vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+    m_descriptorPool = {};
     m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
+    m_graphicsPipeline = {};
     m_devFuncs->vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+    m_pipelineLayout = {};
     QVulkanWindowRenderer::releaseSwapChainResources();
 }
 
@@ -180,9 +183,12 @@ void VulkanRenderer::releaseResources()
     destroyBufferWithMemory(m_indexBuffer);
     destroyBufferWithMemory(m_vertexBuffer);
     m_devFuncs->vkDestroySampler(m_device, m_textureSampler, nullptr);
+    m_textureSampler = {};
     m_devFuncs->vkDestroyImageView(m_device, m_textureImageView, nullptr);
+    m_textureImageView = {};
     destroyImageWithMemory(m_textureImage);
     m_devFuncs->vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
+    m_descriptorSetLayout = {};
     m_devFuncs = {};
     m_device = {};
     m_physDevice = {};
@@ -534,8 +540,8 @@ void VulkanRenderer::updateUniformBuffer() const
     auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory); });
 
     UniformBufferObject &ubo = *reinterpret_cast<UniformBufferObject *>(data);
-    ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(60.0F), glm::vec3{0.0F, 0.0F, 1.0F});
-    ubo.view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F});
+    ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+    ubo.view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F});
     ubo.proj = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
     ubo.proj[1][1] = -ubo.proj[1][1];
 }
@@ -628,6 +634,7 @@ void VulkanRenderer::createTextureImage()
         VkDeviceSize imageSize = texture.sizeInBytes();
         texWidth = texture.width();
         texHeight = texture.height();
+        m_mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
         stagingBuffer = createBuffer(imageSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex());
 
@@ -643,15 +650,114 @@ void VulkanRenderer::createTextureImage()
 
     auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
 
-    m_textureImage = createImage(texWidth, texHeight, textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
-                     VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT | VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT,
+    m_textureImage = createImage(texWidth, texHeight, m_mipLevels, textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
+                     static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                     | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+                     | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT),
                      m_window->deviceLocalMemoryIndex());
-    transitionImageLayout(m_textureImage.image, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    transitionImageLayout(m_textureImage.image, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_mipLevels);
     copyBufferToImage(stagingBuffer.buffer, m_textureImage.image, texWidth, texHeight);
-    transitionImageLayout(m_textureImage.image, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    generateMipmaps(m_textureImage.image, textureFormat, texWidth, texHeight, m_mipLevels);
 }
 
-ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const
+void VulkanRenderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) const
+{
+    qDebug() << "Generate mipmaps for levels: " << mipLevels;
+    VkFormatProperties formatProperties{};
+    m_funcs->vkGetPhysicalDeviceFormatProperties(m_physDevice, imageFormat, &formatProperties);
+    VkFormatFeatureFlags expectedFeatures = VkFormatFeatureFlagBits::VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    if ((formatProperties.optimalTilingFeatures & expectedFeatures) != expectedFeatures) {
+        throw std::runtime_error("texture image format does not support linear blitting");
+    }
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    auto bufferGuard = sg::make_scope_guard([&, this]{ endSingleTimeCommands(commandBuffer); });
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VkStructureType::VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+
+    VkImageBlit blit{};
+    blit.srcOffsets[0] = {0, 0, 0};
+    blit.srcSubresource.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
+    blit.srcSubresource.baseArrayLayer = 0;
+    blit.srcSubresource.layerCount = 1;
+    blit.dstOffsets[0] = {0, 0, 0};
+    blit.dstSubresource.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
+    blit.dstSubresource.baseArrayLayer = 0;
+    blit.dstSubresource.layerCount = 1;
+
+    int32_t mipWidth = texWidth;
+    int32_t mipHeight = texHeight;
+
+    for (uint32_t i = 1; i < mipLevels; ++i) {
+        qDebug() << "Generating level: " << i << ", mipWidth: " << mipWidth << ", mipHeight: " << mipHeight;
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout = VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.srcAccessMask = VkAccessFlagBits::VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VkAccessFlagBits::VK_ACCESS_TRANSFER_READ_BIT;
+
+        m_devFuncs->vkCmdPipelineBarrier(commandBuffer,
+                                         VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         {},
+                                         0, nullptr,
+                                         0, nullptr,
+                                         1, &barrier);
+
+        blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
+        blit.srcSubresource.mipLevel = i - 1;
+        blit.dstOffsets[1] = {mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1};
+        blit.dstSubresource.mipLevel = i;
+
+        m_devFuncs->vkCmdBlitImage(commandBuffer,
+                                   image, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   image, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   1, &blit,
+                                   VkFilter::VK_FILTER_LINEAR);
+
+        barrier.oldLayout = VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout = VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VkAccessFlagBits::VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VkAccessFlagBits::VK_ACCESS_SHADER_READ_BIT;
+
+        m_devFuncs->vkCmdPipelineBarrier(commandBuffer,
+                                         VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VkPipelineStageFlagBits::VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                         {},
+                                         0, nullptr,
+                                         0, nullptr,
+                                         1, &barrier);
+        if (mipWidth > 1) {
+            mipWidth /= 2;
+        }
+        if (mipHeight > 1) {
+            mipHeight /= 2;
+        }
+    }
+
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    barrier.oldLayout = VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VkAccessFlagBits::VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VkAccessFlagBits::VK_ACCESS_SHADER_READ_BIT;
+
+    m_devFuncs->vkCmdPipelineBarrier(commandBuffer,
+                                     VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     VkPipelineStageFlagBits::VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                     {},
+                                     0, nullptr,
+                                     0, nullptr,
+                                     1, &barrier);
+}
+
+ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const
 {
     qDebug() << "Create image";
 
@@ -661,7 +767,7 @@ ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, VkF
     imageInfo.extent.width = width;
     imageInfo.extent.height = height;
     imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
+    imageInfo.mipLevels = mipLevels;
     imageInfo.arrayLayers = 1;
     imageInfo.format = format;
     imageInfo.tiling = tiling;
@@ -704,7 +810,7 @@ void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDevice
     m_devFuncs->vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 }
 
-void VulkanRenderer::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) const
+void VulkanRenderer::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) const
 {
     qDebug() << "Transition image layout";
 
@@ -721,7 +827,7 @@ void VulkanRenderer::transitionImageLayout(VkImage image, VkFormat format, VkIma
 
     barrier.subresourceRange.aspectMask = evalAspectFlags(newLayout, format);
     barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.levelCount = mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 1;
 
@@ -835,10 +941,10 @@ void VulkanRenderer::endSingleTimeCommands(VkCommandBuffer commandBuffer) const
 void VulkanRenderer::createTextureImageView()
 {
     qDebug() << "Create texture image view";
-    m_textureImageView = createImageView(m_textureImage.image, textureFormat);
+    m_textureImageView = createImageView(m_textureImage.image, textureFormat, m_mipLevels);
 }
 
-VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format) const
+VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format, uint32_t mipLevels) const
 {
     qDebug() << "Create image view";
     VkImageViewCreateInfo viewInfo{};
@@ -848,7 +954,7 @@ VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format) cons
     viewInfo.format = format;
     viewInfo.subresourceRange.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
@@ -878,7 +984,7 @@ void VulkanRenderer::createTextureSampler()
     samplerInfo.mipmapMode = VkSamplerMipmapMode::VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.mipLodBias = 0.0F;
     samplerInfo.minLod = 0.0F;
-    samplerInfo.maxLod = 0.0F;
+    samplerInfo.maxLod = static_cast<float>(m_mipLevels);
     checkVkResult(m_devFuncs->vkCreateSampler(m_device, &samplerInfo, nullptr, &m_textureSampler),
                   "failed to create texture sampler");
 }
@@ -887,7 +993,7 @@ void VulkanRenderer::createDepthResources() const
 {
     qDebug() << "Create depth resources";
     transitionImageLayout(m_window->depthStencilImage(), m_window->depthStencilFormat(),
-                          VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+                          VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
 }
 
 void VulkanRenderer::loadModel()
@@ -898,16 +1004,18 @@ void VulkanRenderer::loadModel()
     m_indices.swap(model.indices);
 }
 
-void VulkanRenderer::destroyBufferWithMemory(const BufferWithMemory &buffer) const
+void VulkanRenderer::destroyBufferWithMemory(BufferWithMemory &buffer) const
 {
     qDebug() << "Destroy buffer with memory";
     m_devFuncs->vkDestroyBuffer(m_device, buffer.buffer, nullptr);
     m_devFuncs->vkFreeMemory(m_device, buffer.memory, nullptr);
+    buffer = {};
 }
 
-void VulkanRenderer::destroyImageWithMemory(const ImageWithMemory &image) const
+void VulkanRenderer::destroyImageWithMemory(ImageWithMemory &image) const
 {
     qDebug() << "Destroy image with memory";
     m_devFuncs->vkDestroyImage(m_device, image.image, nullptr);
     m_devFuncs->vkFreeMemory(m_device, image.memory, nullptr);
+    image = {};
 }

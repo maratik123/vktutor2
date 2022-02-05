@@ -145,5 +145,8 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
         }
     }
 
+    qDebug() << "Vertices: " << result.vertices.size();
+    qDebug() << "Indices: " << result.indices.size();
+
     return result;
 }

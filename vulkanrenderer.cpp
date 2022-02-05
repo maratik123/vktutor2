@@ -1,22 +1,16 @@
 #include "vulkanrenderer.h"
 
 #include "externals/scope_guard/scope_guard.hpp"
+
 #include "utils.h"
+#include "glm.h"
+#include "model.h"
+#include "vertex.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <string>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
-#define GLM_FORCE_INTRINSICS
-#define GLM_FORCE_EXPLICIT_CTOR
-#include <glm/mat4x4.hpp>
-#include <glm/vec2.hpp>
-#include <glm/vec3.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
 #include <QColorSpace>
 #include <QDebug>
@@ -28,7 +22,9 @@
 namespace {
 const QString vertShaderName = QStringLiteral(":/shaders/shader.vert.spv");
 const QString fragShaderName = QStringLiteral(":/shaders/shader.frag.spv");
-const QString textureName = QStringLiteral(":/textures/texture.jpg");
+const QString textureName = QStringLiteral(":/textures/viking_room.png");
+const QString modelDirName = QStringLiteral(":/models");
+const QString modelName = QStringLiteral("viking_room.obj");
 
 [[nodiscard]] QByteArray readFile(const QString &fileName)
 {
@@ -63,61 +59,6 @@ constexpr VkClearDepthStencilValue clearDepthStencil{1.0F, 0};
         }
     };
 }
-
-struct Vertex
-{
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord;
-
-    [[nodiscard]] static constexpr VkVertexInputBindingDescription createBindingDescription()
-    {
-        VkVertexInputBindingDescription bindingDescription{};
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VkVertexInputRate::VK_VERTEX_INPUT_RATE_VERTEX;
-
-        return bindingDescription;
-    }
-
-    [[nodiscard]] static constexpr std::array<VkVertexInputAttributeDescription, 3> createAttributeDescriptions()
-    {
-        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VkFormat::VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VkFormat::VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, color);
-
-        attributeDescriptions[2].binding = 0;
-        attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VkFormat::VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
-
-        return attributeDescriptions;
-    }
-};
-
-const std::array vertices{
-    Vertex{{-0.5F, -0.5F, 0.0F}, {1.0F, 0.0F, 0.0F}, {1.0F, 0.0F}},
-    Vertex{{0.5F, -0.5F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F}},
-    Vertex{{0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}},
-    Vertex{{-0.5F, 0.5F, 0.0F}, {1.0F, 1.0F, 1.0F}, {1.0F, 1.0F}},
-
-    Vertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 0.0F, 0.0F}, {1.0F, 0.0F}},
-    Vertex{{0.5F, -0.5F, -0.5F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F}},
-    Vertex{{0.5F, 0.5F, -0.5F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}},
-    Vertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 1.0F}}
-};
-
-constexpr std::array<uint16_t, 12> indices{
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4
-};
 
 [[noreturn]] void throwErrorMessage(VkResult actualResult, const char *errorMessage, VkResult expectedResult)
 {
@@ -204,6 +145,7 @@ void VulkanRenderer::initResources()
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
+    loadModel();
     createVertexBuffer();
     createIndexBuffer();
     QVulkanWindowRenderer::initResources();
@@ -462,7 +404,7 @@ void VulkanRenderer::createVertexBuffer()
 {
     qDebug() << "Create vertex buffer";
 
-    VkDeviceSize bufferSize = sizeof(vertices);
+    VkDeviceSize bufferSize = m_vertices.size() * sizeof(decltype(m_vertices)::value_type);
 
     auto stagingBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex());
     auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
@@ -472,7 +414,7 @@ void VulkanRenderer::createVertexBuffer()
                   "failed to map memory to staging vertex buffer");
     {
         auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
-        std::copy(vertices.cbegin(), vertices.cend(), reinterpret_cast<Vertex *>(data));
+        std::copy(m_vertices.cbegin(), m_vertices.cend(), reinterpret_cast<decltype(m_vertices)::value_type *>(data));
     }
 
     m_vertexBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -485,7 +427,7 @@ void VulkanRenderer::createIndexBuffer()
 {
     qDebug() << "Create index buffer";
 
-    VkDeviceSize bufferSize = sizeof(indices);
+    VkDeviceSize bufferSize = m_indices.size() * sizeof(decltype(m_indices)::value_type);
 
     auto stagingBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex());
     auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
@@ -495,7 +437,7 @@ void VulkanRenderer::createIndexBuffer()
                   "failed to map memory to staging index buffer");
     {
         auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
-        std::copy(indices.cbegin(), indices.cend(), reinterpret_cast<uint16_t *>(data));
+        std::copy(m_indices.cbegin(), m_indices.cend(), reinterpret_cast<decltype(m_indices)::value_type *>(data));
     }
 
     m_indexBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -565,9 +507,9 @@ void VulkanRenderer::startNextFrame()
 
     m_devFuncs->vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0,
                                         1, &m_descriptorSets.at(m_window->currentSwapChainImageIndex()), 0, nullptr);
-    m_devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
+    m_devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT32);
 
-    m_devFuncs->vkCmdDrawIndexed(commandBuffer, indices.size(), 1, 0, 0, 0);
+    m_devFuncs->vkCmdDrawIndexed(commandBuffer, m_indices.size(), 1, 0, 0, 0);
     m_devFuncs->vkCmdEndRenderPass(commandBuffer);
     m_window->frameReady();
     m_window->requestUpdate();
@@ -592,7 +534,7 @@ void VulkanRenderer::updateUniformBuffer() const
     auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory); });
 
     UniformBufferObject &ubo = *reinterpret_cast<UniformBufferObject *>(data);
-    ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(90.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+    ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(60.0F), glm::vec3{0.0F, 0.0F, 1.0F});
     ubo.view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 0.0F, 1.0F});
     ubo.proj = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
     ubo.proj[1][1] = -ubo.proj[1][1];
@@ -678,7 +620,7 @@ void VulkanRenderer::createTextureImage()
     int texHeight{};
     try {
         QImage texture = QImage{textureName}
-                .convertToFormat(QImage::Format::Format_RGBX8888);
+                .convertToFormat(QImage::Format::Format_RGBA8888);
         texture.convertToColorSpace(QColorSpace::NamedColorSpace::SRgb);
         if (texture.isNull()) {
             throw std::runtime_error("failed to load texture image");
@@ -941,11 +883,19 @@ void VulkanRenderer::createTextureSampler()
                   "failed to create texture sampler");
 }
 
-void VulkanRenderer::createDepthResources()
+void VulkanRenderer::createDepthResources() const
 {
     qDebug() << "Create depth resources";
     transitionImageLayout(m_window->depthStencilImage(), m_window->depthStencilFormat(),
                           VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+}
+
+void VulkanRenderer::loadModel()
+{
+    qDebug() << "Load model";
+    auto model = Model::loadModel(modelDirName, modelName);
+    m_vertices.swap(model.vertices);
+    m_indices.swap(model.indices);
 }
 
 void VulkanRenderer::destroyBufferWithMemory(const BufferWithMemory &buffer) const

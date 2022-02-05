@@ -3,7 +3,7 @@
 
 #include <QVulkanWindowRenderer>
 
-class QFile;
+class Vertex;
 
 struct BufferWithMemory {
     VkBuffer buffer;
@@ -51,6 +51,9 @@ private:
     VkDescriptorPool m_descriptorPool;
     QVector<VkDescriptorSet> m_descriptorSets;
 
+    QVector<Vertex> m_vertices;
+    QVector<uint32_t> m_indices;
+
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code) const;
     void createDescriptorSetLayout();
     void createGraphicsPipeline();
@@ -73,7 +76,8 @@ private:
     void createTextureImageView();
     [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format) const;
     void createTextureSampler();
-    void createDepthResources();
+    void createDepthResources() const;
+    void loadModel();
 };
 
 #endif // VULKANRENDERER_H

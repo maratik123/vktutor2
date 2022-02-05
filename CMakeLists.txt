@@ -159,8 +159,10 @@ set(PROJECT_SOURCES
     closeeventfilter.cpp closeeventfilter.h
     constlatin1string.cpp constlatin1string.h
     vulkanrenderer.cpp vulkanrenderer.h
-    queuefamilyindices.cpp queuefamilyindices.h
     utils.cpp utils.h
+    vertex.cpp vertex.h
+    glm.h
+    model.cpp model.h
     externals/scope_guard/scope_guard.hpp
     externals/tinyobjloader/tiny_obj_loader.h
 )

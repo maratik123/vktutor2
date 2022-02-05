@@ -127,21 +127,21 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
                 attrib.vertices[3 * index.vertex_index + 2]
             };
 
+            vertex.color = {1.0F, 1.0F, 1.0F};
+
             vertex.texCoord = {
                 attrib.texcoords[2 * index.texcoord_index + 0],
                 1.0F - attrib.texcoords[2 * index.texcoord_index + 1]
             };
 
-            vertex.color = {1.0F, 1.0F, 1.0F};
-
-            auto iUniqueVertices = uniqueVertices.find(vertex);
+            auto iUniqueVertices = uniqueVertices.constFind(vertex);
 
             if (iUniqueVertices == uniqueVertices.cend()) {
-                iUniqueVertices = uniqueVertices.insert(vertex, result.vertices.size());
+                iUniqueVertices = static_cast<decltype(iUniqueVertices)>(uniqueVertices.insert(vertex, result.vertices.size()));
                 result.vertices.push_back(vertex);
             }
 
-            result.indices.push_back(*iUniqueVertices);
+            result.indices.push_back(iUniqueVertices.value());
         }
     }
 

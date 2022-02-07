@@ -138,7 +138,10 @@ void VulkanRenderer::preInitResources()
             VkFormat::VK_FORMAT_B8G8R8A8_UNORM
     });
     loadModel();
-    m_window->setSampleCount(m_window->supportedSampleCounts().last());
+    {
+        auto supportedSampleCounts = m_window->supportedSampleCounts();
+        m_window->setSampleCount(supportedSampleCounts.constLast());
+    }
     QVulkanWindowRenderer::preInitResources();
 }
 
@@ -563,7 +566,6 @@ void VulkanRenderer::updateUniformBuffer() const
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     auto swapChainImageSize = m_window->swapChainImageSize();
-    auto ratio = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
 
     auto currentSwapChainImageIndex = m_window->currentSwapChainImageIndex();
 
@@ -579,6 +581,7 @@ void VulkanRenderer::updateUniformBuffer() const
         UniformBufferObject &ubo = *reinterpret_cast<UniformBufferObject *>(data);
 
         ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+        auto ratio = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
         ubo.projView = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
         ubo.projView[1][1] = -ubo.projView[1][1];
         glm::mat4 view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F});

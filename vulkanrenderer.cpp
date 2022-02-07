@@ -63,7 +63,7 @@ constexpr VkClearDepthStencilValue clearDepthStencil{1.0F, 0};
 [[noreturn]] void throwErrorMessage(VkResult actualResult, const char *errorMessage, VkResult expectedResult)
 {
     std::string message(errorMessage);
-    message += "expected result: ";
+    message += ", expected result: ";
     message += std::to_string(expectedResult);
     message += ", actual result: ";
     message += std::to_string(actualResult);
@@ -80,8 +80,13 @@ void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult exp
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
+    alignas(16) glm::mat4 projView;
+};
+
+struct LightInfo {
+    alignas(16) glm::vec4 ambientColor;
+    alignas(16) glm::vec4 diffuseLightPos;
+    alignas(16) glm::vec4 diffuseLightColor;
 };
 
 constexpr VkFormat textureFormat = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
@@ -158,6 +163,7 @@ void VulkanRenderer::initSwapChainResources()
     createGraphicsPipeline();
     createDepthResources();
     createUniformBuffers();
+    createLightInfoBuffers();
     createDescriptorPool();
     createDescriptorSets();
     QVulkanWindowRenderer::initSwapChainResources();
@@ -166,9 +172,8 @@ void VulkanRenderer::initSwapChainResources()
 void VulkanRenderer::releaseSwapChainResources()
 {
     qDebug() << "releaseSwapChainResources";
-    for (auto iBuffer : qAsConst(m_uniformBuffers)) {
-        destroyBufferWithMemory(iBuffer);
-    }
+    destroyBuffers(m_uniformBuffers);
+    destroyBuffers(m_lightInfoBuffers);
     m_devFuncs->vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     m_descriptorPool = {};
     m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
@@ -225,7 +230,7 @@ void VulkanRenderer::createDescriptorSetLayout()
 {
     qDebug() << "Create descriptor set layout";
 
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
 
     VkDescriptorSetLayoutBinding &uboLayoutBinding = bindings[0];
     uboLayoutBinding.binding = 0;
@@ -236,10 +241,17 @@ void VulkanRenderer::createDescriptorSetLayout()
 
     VkDescriptorSetLayoutBinding &samplerLayoutBinding = bindings[1];
     samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
     samplerLayoutBinding.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
+    samplerLayoutBinding.descriptorCount = 1;
     samplerLayoutBinding.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding &lightInfoLayoutBinding = bindings[2];
+    lightInfoLayoutBinding.binding = 2;
+    lightInfoLayoutBinding.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    lightInfoLayoutBinding.descriptorCount = 1;
+    lightInfoLayoutBinding.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT;
+    lightInfoLayoutBinding.pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -457,13 +469,34 @@ void VulkanRenderer::createUniformBuffers()
 {
     qDebug() << "Create uniform buffers";
 
+    createBuffers<UniformBufferObject>(m_uniformBuffers);
+}
+
+void VulkanRenderer::createLightInfoBuffers()
+{
+    qDebug() << "Create light info buffers";
+
+    createBuffers<LightInfo>(m_lightInfoBuffers);
+}
+
+template<typename T>
+void VulkanRenderer::createBuffers(QVector<BufferWithMemory> &buffers) const
+{
+    createBuffers(buffers, sizeof(T));
+}
+
+void VulkanRenderer::createBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const
+{
+    qDebug() << "Create buffers";
+
     auto swapChainImageCount = m_window->swapChainImageCount();
-    m_uniformBuffers.clear();
-    m_uniformBuffers.reserve(swapChainImageCount);
+    buffers.clear();
+    buffers.reserve(swapChainImageCount);
     for (int i = 0; i < swapChainImageCount; ++i) {
-        m_uniformBuffers.append(createBuffer(sizeof(UniformBufferObject), VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, m_window->hostVisibleMemoryIndex()));
+        buffers << createBuffer(size, VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, m_window->hostVisibleMemoryIndex());
     }
 }
+
 
 BufferWithMemory VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex) const
 {
@@ -532,19 +565,43 @@ void VulkanRenderer::updateUniformBuffer() const
     auto swapChainImageSize = m_window->swapChainImageSize();
     auto ratio = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
 
-    VkDeviceMemory uniformBufferMemory = m_uniformBuffers.at(m_window->currentSwapChainImageIndex()).memory;
+    auto currentSwapChainImageIndex = m_window->currentSwapChainImageIndex();
 
-    void *data{};
+    {
+        VkDeviceMemory uniformBufferMemory = m_uniformBuffers.at(currentSwapChainImageIndex).memory;
 
-    checkVkResult(m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeof(UniformBufferObject), {}, &data),
-                  "failed to map uniform buffer object memory");
-    auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory); });
+        void *data{};
 
-    UniformBufferObject &ubo = *reinterpret_cast<UniformBufferObject *>(data);
-    ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
-    ubo.view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F});
-    ubo.proj = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
-    ubo.proj[1][1] = -ubo.proj[1][1];
+        checkVkResult(m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeof(UniformBufferObject), {}, &data),
+                      "failed to map uniform buffer object memory");
+        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory); });
+
+        UniformBufferObject &ubo = *reinterpret_cast<UniformBufferObject *>(data);
+
+        ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+        ubo.projView = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
+        ubo.projView[1][1] = -ubo.projView[1][1];
+        glm::mat4 view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F});
+
+        ubo.projView *= view;
+    }
+    {
+        VkDeviceMemory lightInfoMemory = m_lightInfoBuffers.at(currentSwapChainImageIndex).memory;
+
+        void *data{};
+
+        checkVkResult(m_devFuncs->vkMapMemory(m_device, lightInfoMemory, 0, sizeof(LightInfo), {}, &data),
+                      "failed to map light info memory");
+        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, lightInfoMemory); });
+
+        LightInfo &lightInfo = *reinterpret_cast<LightInfo *>(data);
+
+        glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+
+        lightInfo.ambientColor = {0.2F, 0.2F, 0.2F, 1.0F};
+        lightInfo.diffuseLightPos = modelDiffuseLightPos * glm::vec4(-2.0F, 2.0F, 1.0F, 1.0F);
+        lightInfo.diffuseLightColor = {1.0F, 1.0F, 0.0F, 1.0F};
+    }
 }
 
 void VulkanRenderer::createDescriptorPool()
@@ -552,11 +609,13 @@ void VulkanRenderer::createDescriptorPool()
     qDebug() << "Create descriptor pool";
     auto swapChainImageCount = m_window->swapChainImageCount();
 
-    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = swapChainImageCount;
     poolSizes[1].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[1].descriptorCount = swapChainImageCount;
+    poolSizes[2].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[2].descriptorCount = swapChainImageCount;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -584,8 +643,12 @@ void VulkanRenderer::createDescriptorSets()
 
     {
         const auto *iUniformBuffers = m_uniformBuffers.cbegin();
+        const auto *iLighInfoBuffers = m_lightInfoBuffers.cbegin();
         const auto *iDescriptorSets = m_descriptorSets.cbegin();
-        for (; iUniformBuffers != m_uniformBuffers.cend() && iDescriptorSets != m_descriptorSets.cend(); ++iUniformBuffers, ++iDescriptorSets) {
+        for (; iUniformBuffers != m_uniformBuffers.cend()
+             && iLighInfoBuffers != m_lightInfoBuffers.cend()
+             && iDescriptorSets != m_descriptorSets.cend();
+             ++iUniformBuffers, ++iLighInfoBuffers, ++iDescriptorSets) {
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = iUniformBuffers->buffer;
             bufferInfo.offset = 0;
@@ -596,7 +659,12 @@ void VulkanRenderer::createDescriptorSets()
             imageInfo.imageView = m_textureImageView;
             imageInfo.sampler = m_textureSampler;
 
-            std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+            VkDescriptorBufferInfo lightInfoBufferInfo{};
+            lightInfoBufferInfo.buffer = iLighInfoBuffers->buffer;
+            lightInfoBufferInfo.offset = 0;
+            lightInfoBufferInfo.range = sizeof(LightInfo);
+
+            std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
 
             descriptorWrites[0].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = *iDescriptorSets;
@@ -613,6 +681,14 @@ void VulkanRenderer::createDescriptorSets()
             descriptorWrites[1].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[1].descriptorCount = 1;
             descriptorWrites[1].pImageInfo = &imageInfo;
+
+            descriptorWrites[2].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[2].dstSet = *iDescriptorSets;
+            descriptorWrites[2].dstBinding = 2;
+            descriptorWrites[2].dstArrayElement = 0;
+            descriptorWrites[2].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[2].descriptorCount = 1;
+            descriptorWrites[2].pBufferInfo = &lightInfoBufferInfo;
 
             m_devFuncs->vkUpdateDescriptorSets(m_device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
         }
@@ -1021,4 +1097,12 @@ void VulkanRenderer::destroyImageWithMemory(ImageWithMemory &image) const
     m_devFuncs->vkDestroyImage(m_device, image.image, nullptr);
     m_devFuncs->vkFreeMemory(m_device, image.memory, nullptr);
     image = {};
+}
+
+void VulkanRenderer::destroyBuffers(QVector<BufferWithMemory> &buffers) const
+{
+    qDebug() << "Destroy buffers";
+    for (auto &iBuffer : buffers) {
+        destroyBufferWithMemory(iBuffer);
+    }
 }

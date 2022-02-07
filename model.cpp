@@ -117,22 +117,30 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
     Model result{};
     QHash<Vertex, uint32_t> uniqueVertices{};
 
-    for(const auto &shape : shapes) {
+    for (const auto &shape : shapes) {
         for (const auto &index : shape.mesh.indices) {
             Vertex vertex{};
-
+            auto vi = 3 * index.vertex_index;
             vertex.pos = {
-                attrib.vertices[3 * index.vertex_index + 0],
-                attrib.vertices[3 * index.vertex_index + 1],
-                attrib.vertices[3 * index.vertex_index + 2]
+                attrib.vertices[vi + 0],
+                attrib.vertices[vi + 1],
+                attrib.vertices[vi + 2]
             };
 
             vertex.color = {1.0F, 1.0F, 1.0F};
 
+            auto ti = 2 * index.texcoord_index;
             vertex.texCoord = {
-                attrib.texcoords[2 * index.texcoord_index + 0],
-                1.0F - attrib.texcoords[2 * index.texcoord_index + 1]
+                attrib.texcoords[ti + 0],
+                1.0F - attrib.texcoords[ti + 1]
             };
+
+            auto ni = 3 * index.normal_index;
+            vertex.normal = glm::normalize(glm::vec3{
+                attrib.normals[ni + 0],
+                attrib.normals[ni + 1],
+                attrib.normals[ni + 2]
+            });
 
             auto iUniqueVertices = uniqueVertices.constFind(vertex);
 

@@ -49,6 +49,7 @@ private:
     VkSampler m_textureSampler;
 
     QVector<BufferWithMemory> m_uniformBuffers;
+    QVector<BufferWithMemory> m_lightInfoBuffers;
     VkDescriptorPool m_descriptorPool;
     QVector<VkDescriptorSet> m_descriptorSets;
 
@@ -67,6 +68,10 @@ private:
     void createIndexBuffer();
 
     void createUniformBuffers();
+    void createLightInfoBuffers();
+    template<typename T>
+    void createBuffers(QVector<BufferWithMemory> &buffers) const;
+    void createBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const;
 
     void createTextureImage();
     void createTextureImageView();
@@ -94,6 +99,7 @@ private:
 
     void destroyBufferWithMemory(BufferWithMemory &buffer) const;
     void destroyImageWithMemory(ImageWithMemory &image) const;
+    void destroyBuffers(QVector<BufferWithMemory> &buffers) const;
 };
 
 #endif // VULKANRENDERER_H

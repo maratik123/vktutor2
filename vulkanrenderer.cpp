@@ -78,12 +78,13 @@ void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult exp
     throwErrorMessage(actualResult, errorMessage, expectedResult);
 }
 
-struct UniformBufferObject {
+struct VertBindingObject {
     alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 modelInvTrans;
     alignas(16) glm::mat4 projView;
 };
 
-struct LightInfo {
+struct FragBindingObject {
     alignas(16) glm::vec4 ambientColor;
     alignas(16) glm::vec4 diffuseLightPos;
     alignas(16) glm::vec4 diffuseLightColor;
@@ -165,8 +166,8 @@ void VulkanRenderer::initSwapChainResources()
     qDebug() << "initSwapChainResources";
     createGraphicsPipeline();
     createDepthResources();
-    createUniformBuffers();
-    createLightInfoBuffers();
+    createVertUniformBuffers();
+    createFragUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
     QVulkanWindowRenderer::initSwapChainResources();
@@ -175,8 +176,8 @@ void VulkanRenderer::initSwapChainResources()
 void VulkanRenderer::releaseSwapChainResources()
 {
     qDebug() << "releaseSwapChainResources";
-    destroyBuffers(m_uniformBuffers);
-    destroyBuffers(m_lightInfoBuffers);
+    destroyUniformBuffers(m_vertUniformBuffers);
+    destroyUniformBuffers(m_fragUniformBuffers);
     m_devFuncs->vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     m_descriptorPool = {};
     m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
@@ -468,29 +469,29 @@ void VulkanRenderer::createIndexBuffer()
     copyBuffer(stagingBuffer.buffer, m_indexBuffer.buffer, bufferSize);
 }
 
-void VulkanRenderer::createUniformBuffers()
+void VulkanRenderer::createVertUniformBuffers()
 {
-    qDebug() << "Create uniform buffers";
+    qDebug() << "Create vertex uniform buffers";
 
-    createBuffers<UniformBufferObject>(m_uniformBuffers);
+    createUniformBuffers<VertBindingObject>(m_vertUniformBuffers);
 }
 
-void VulkanRenderer::createLightInfoBuffers()
+void VulkanRenderer::createFragUniformBuffers()
 {
-    qDebug() << "Create light info buffers";
+    qDebug() << "Create fragment uniform buffers";
 
-    createBuffers<LightInfo>(m_lightInfoBuffers);
+    createUniformBuffers<FragBindingObject>(m_fragUniformBuffers);
 }
 
 template<typename T>
-void VulkanRenderer::createBuffers(QVector<BufferWithMemory> &buffers) const
+void VulkanRenderer::createUniformBuffers(QVector<BufferWithMemory> &buffers) const
 {
-    createBuffers(buffers, sizeof(T));
+    createUniformBuffers(buffers, sizeof(T));
 }
 
-void VulkanRenderer::createBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const
+void VulkanRenderer::createUniformBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const
 {
-    qDebug() << "Create buffers";
+    qDebug() << "Create uniform buffers";
 
     auto swapChainImageCount = m_window->swapChainImageCount();
     buffers.clear();
@@ -570,40 +571,44 @@ void VulkanRenderer::updateUniformBuffer() const
     auto currentSwapChainImageIndex = m_window->currentSwapChainImageIndex();
 
     {
-        VkDeviceMemory uniformBufferMemory = m_uniformBuffers.at(currentSwapChainImageIndex).memory;
+        VkDeviceMemory vertUniformBufferMemory = m_vertUniformBuffers.at(currentSwapChainImageIndex).memory;
 
         void *data{};
 
-        checkVkResult(m_devFuncs->vkMapMemory(m_device, uniformBufferMemory, 0, sizeof(UniformBufferObject), {}, &data),
+        checkVkResult(m_devFuncs->vkMapMemory(m_device, vertUniformBufferMemory, 0, sizeof(VertBindingObject), {}, &data),
                       "failed to map uniform buffer object memory");
-        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, uniformBufferMemory); });
+        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, vertUniformBufferMemory); });
 
-        UniformBufferObject &ubo = *reinterpret_cast<UniformBufferObject *>(data);
+        VertBindingObject &vertUbo = *reinterpret_cast<VertBindingObject *>(data);
 
-        ubo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+        vertUbo.model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+
+        vertUbo.modelInvTrans = glm::transpose(glm::inverse(vertUbo.model));
+
         auto ratio = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
-        ubo.projView = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
-        ubo.projView[1][1] = -ubo.projView[1][1];
+        vertUbo.projView = glm::perspective(glm::radians(45.0F), ratio, 0.1F, 10.0F);
+        vertUbo.projView[1][1] = -vertUbo.projView[1][1];
+
         glm::mat4 view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F});
 
-        ubo.projView *= view;
+        vertUbo.projView *= view;
     }
     {
-        VkDeviceMemory lightInfoMemory = m_lightInfoBuffers.at(currentSwapChainImageIndex).memory;
+        VkDeviceMemory fragUniformBufferMemory = m_fragUniformBuffers.at(currentSwapChainImageIndex).memory;
 
         void *data{};
 
-        checkVkResult(m_devFuncs->vkMapMemory(m_device, lightInfoMemory, 0, sizeof(LightInfo), {}, &data),
+        checkVkResult(m_devFuncs->vkMapMemory(m_device, fragUniformBufferMemory, 0, sizeof(FragBindingObject), {}, &data),
                       "failed to map light info memory");
-        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, lightInfoMemory); });
+        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, fragUniformBufferMemory); });
 
-        LightInfo &lightInfo = *reinterpret_cast<LightInfo *>(data);
+        FragBindingObject &fragUbo = *reinterpret_cast<FragBindingObject *>(data);
 
         glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
-        lightInfo.ambientColor = {0.1F, 0.1F, 0.1F, 1.0F};
-        lightInfo.diffuseLightPos = modelDiffuseLightPos * glm::vec4(-2.0F, 2.0F, 1.0F, 1.0F);
-        lightInfo.diffuseLightColor = {1.0F, 1.0F, 0.0F, 1.0F};
+        fragUbo.ambientColor = {0.1F, 0.1F, 0.1F, 1.0F};
+        fragUbo.diffuseLightPos = modelDiffuseLightPos * glm::vec4(-2.0F, 2.0F, 1.0F, 1.0F);
+        fragUbo.diffuseLightColor = {1.0F, 1.0F, 0.0F, 1.0F};
     }
 }
 
@@ -645,17 +650,17 @@ void VulkanRenderer::createDescriptorSets()
                   "failed to allocate descriptor sets");
 
     {
-        const auto *iUniformBuffers = m_uniformBuffers.cbegin();
-        const auto *iLighInfoBuffers = m_lightInfoBuffers.cbegin();
+        const auto *iVertUniformBuffers = m_vertUniformBuffers.cbegin();
+        const auto *iFragUniformBuffers = m_fragUniformBuffers.cbegin();
         const auto *iDescriptorSets = m_descriptorSets.cbegin();
-        for (; iUniformBuffers != m_uniformBuffers.cend()
-             && iLighInfoBuffers != m_lightInfoBuffers.cend()
+        for (; iVertUniformBuffers != m_vertUniformBuffers.cend()
+             && iFragUniformBuffers != m_fragUniformBuffers.cend()
              && iDescriptorSets != m_descriptorSets.cend();
-             ++iUniformBuffers, ++iLighInfoBuffers, ++iDescriptorSets) {
+             ++iVertUniformBuffers, ++iFragUniformBuffers, ++iDescriptorSets) {
             VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = iUniformBuffers->buffer;
+            bufferInfo.buffer = iVertUniformBuffers->buffer;
             bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(UniformBufferObject);
+            bufferInfo.range = sizeof(VertBindingObject);
 
             VkDescriptorImageInfo imageInfo{};
             imageInfo.imageLayout = VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -663,9 +668,9 @@ void VulkanRenderer::createDescriptorSets()
             imageInfo.sampler = m_textureSampler;
 
             VkDescriptorBufferInfo lightInfoBufferInfo{};
-            lightInfoBufferInfo.buffer = iLighInfoBuffers->buffer;
+            lightInfoBufferInfo.buffer = iFragUniformBuffers->buffer;
             lightInfoBufferInfo.offset = 0;
-            lightInfoBufferInfo.range = sizeof(LightInfo);
+            lightInfoBufferInfo.range = sizeof(FragBindingObject);
 
             std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
 
@@ -1102,7 +1107,7 @@ void VulkanRenderer::destroyImageWithMemory(ImageWithMemory &image) const
     image = {};
 }
 
-void VulkanRenderer::destroyBuffers(QVector<BufferWithMemory> &buffers) const
+void VulkanRenderer::destroyUniformBuffers(QVector<BufferWithMemory> &buffers) const
 {
     qDebug() << "Destroy buffers";
     for (auto &iBuffer : buffers) {

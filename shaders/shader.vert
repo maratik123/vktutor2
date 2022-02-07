@@ -1,7 +1,8 @@
 #version 450
 
-layout(binding = 0) uniform UniformBindingLayout {
+layout(binding = 0) uniform VertBindingLayout {
     mat4 model;
+    mat4 modelInvTrans;
     mat4 projView;
 } ubo;
 
@@ -20,6 +21,6 @@ void main() {
     gl_Position = ubo.projView * mpos;
     fragPosition = mpos.xyz;
     fragColor = inColor;
-    fragNormal = mat3(ubo.model) * inNormal;
+    fragNormal = mat3(ubo.modelInvTrans) * inNormal;
     fragTexCoord = inTexCoord;
 }

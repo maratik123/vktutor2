@@ -17,7 +17,7 @@ layout(location = 0) out vec4 outColor;
 void main() {
 //    outColor = vec4(fragNormal, 1.0);
     vec3 lightDir = normalize(lightInfo.diffuseLightPos.xyz - fragPosition);
-    float diff = max(dot(fragNormal, lightDir), 0.0);
+    float diff = max(dot(normalize(fragNormal), lightDir), 0.0);
     vec3 diffuse = diff * lightInfo.diffuseLightColor.rgb;
     outColor = vec4((diffuse + lightInfo.ambientColor.rgb) * fragColor * texture(texSampler, fragTexCoord).rgb, 1.0);
 }

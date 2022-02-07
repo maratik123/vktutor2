@@ -601,7 +601,7 @@ void VulkanRenderer::updateUniformBuffer() const
 
         glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
-        lightInfo.ambientColor = {0.2F, 0.2F, 0.2F, 1.0F};
+        lightInfo.ambientColor = {0.1F, 0.1F, 0.1F, 1.0F};
         lightInfo.diffuseLightPos = modelDiffuseLightPos * glm::vec4(-2.0F, 2.0F, 1.0F, 1.0F);
         lightInfo.diffuseLightColor = {1.0F, 1.0F, 0.0F, 1.0F};
     }

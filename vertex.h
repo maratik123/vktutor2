@@ -21,4 +21,13 @@ struct ModelVertex
 
 uint qHash(const ModelVertex &key, uint seed = 0) noexcept;
 
+struct ColorVertex
+{
+    glm::vec3 pos;
+    glm::vec3 color;
+
+    [[nodiscard]] static VkVertexInputBindingDescription createBindingDescription();
+    [[nodiscard]] static std::array<VkVertexInputAttributeDescription, 2> createAttributeDescriptions();
+};
+
 #endif // VERTEX_H

@@ -5,14 +5,22 @@
 
 class ModelVertex;
 
-struct BufferWithMemory {
+struct BufferWithMemory
+{
     VkBuffer buffer;
     VkDeviceMemory memory;
 };
 
-struct ImageWithMemory {
+struct ImageWithMemory
+{
     VkImage image;
     VkDeviceMemory memory;
+};
+
+struct PipelineWithLayout
+{
+    VkPipelineLayout layout;
+    VkPipeline pipeline;
 };
 
 class VulkanRenderer : public QVulkanWindowRenderer
@@ -36,11 +44,9 @@ private:
     VkPhysicalDevice m_physDevice;
     VkDevice m_device;
     QVulkanDeviceFunctions *m_devFuncs;
-    bool m_msaa;
 
     VkDescriptorSetLayout m_descriptorSetLayout;
-    VkPipelineLayout m_pipelineLayout;
-    VkPipeline m_graphicsPipeline;
+    PipelineWithLayout m_graphicsPipelineWithLayout;
     BufferWithMemory m_vertexBuffer;
     BufferWithMemory m_indexBuffer;
     uint32_t m_mipLevels;
@@ -57,10 +63,10 @@ private:
     QVector<uint32_t> m_indices;
 
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code) const;
-    void createDescriptorSetLayout();
-    void createGraphicsPipeline();
-    void createDescriptorPool();
-    void createDescriptorSets();
+    [[nodiscard]] VkDescriptorSetLayout createDescriptorSetLayout() const;
+    [[nodiscard]] PipelineWithLayout createGraphicsPipeline() const;
+    [[nodiscard]] VkDescriptorPool createDescriptorPool() const;
+    [[nodiscard]] QVector<VkDescriptorSet> createDescriptorSets() const;
 
     void loadModel();
 
@@ -100,6 +106,7 @@ private:
     void destroyBufferWithMemory(BufferWithMemory &buffer) const;
     void destroyImageWithMemory(ImageWithMemory &image) const;
     void destroyUniformBuffers(QVector<BufferWithMemory> &buffers) const;
+    void destroyPipelineWithLayout(PipelineWithLayout &pipelineWithLayout) const;
 };
 
 #endif // VULKANRENDERER_H

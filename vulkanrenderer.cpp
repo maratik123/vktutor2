@@ -116,10 +116,8 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_physDevice{}
     , m_device{}
     , m_devFuncs{}
-    , m_msaa{}
     , m_descriptorSetLayout{}
-    , m_pipelineLayout{}
-    , m_graphicsPipeline{}
+    , m_graphicsPipelineWithLayout{}
     , m_vertexBuffer{}
     , m_indexBuffer{}
     , m_descriptorPool{}
@@ -153,7 +151,7 @@ void VulkanRenderer::initResources()
     m_physDevice = m_window->physicalDevice();
     m_device = m_window->device();
     m_devFuncs = m_vkInst->deviceFunctions(m_device);
-    createDescriptorSetLayout();
+    m_descriptorSetLayout = createDescriptorSetLayout();
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
@@ -165,12 +163,12 @@ void VulkanRenderer::initResources()
 void VulkanRenderer::initSwapChainResources()
 {
     qDebug() << "initSwapChainResources";
-    createGraphicsPipeline();
+    m_graphicsPipelineWithLayout = createGraphicsPipeline();
     createDepthResources();
     createVertUniformBuffers();
     createFragUniformBuffers();
-    createDescriptorPool();
-    createDescriptorSets();
+    m_descriptorPool = createDescriptorPool();
+    m_descriptorSets = createDescriptorSets();
     QVulkanWindowRenderer::initSwapChainResources();
 }
 
@@ -181,10 +179,7 @@ void VulkanRenderer::releaseSwapChainResources()
     destroyUniformBuffers(m_fragUniformBuffers);
     m_devFuncs->vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     m_descriptorPool = {};
-    m_devFuncs->vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
-    m_graphicsPipeline = {};
-    m_devFuncs->vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-    m_pipelineLayout = {};
+    destroyPipelineWithLayout(m_graphicsPipelineWithLayout);
     QVulkanWindowRenderer::releaseSwapChainResources();
 }
 
@@ -231,7 +226,7 @@ VkShaderModule VulkanRenderer::createShaderModule(const QByteArray &code) const
     return shaderModule;
 }
 
-void VulkanRenderer::createDescriptorSetLayout()
+VkDescriptorSetLayout VulkanRenderer::createDescriptorSetLayout() const
 {
     qDebug() << "Create descriptor set layout";
 
@@ -262,11 +257,13 @@ void VulkanRenderer::createDescriptorSetLayout()
     layoutInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = bindings.size();
     layoutInfo.pBindings = bindings.data();
-    checkVkResult(m_devFuncs->vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout),
+    VkDescriptorSetLayout descriptorSetLayout{};
+    checkVkResult(m_devFuncs->vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &descriptorSetLayout),
                   "failed to create descriptor set layout");
+    return descriptorSetLayout;
 }
 
-void VulkanRenderer::createGraphicsPipeline()
+PipelineWithLayout VulkanRenderer::createGraphicsPipeline() const
 {
     qDebug() << "Create graphics pipeline";
     VkShaderModule vertShaderModule{};
@@ -344,16 +341,10 @@ void VulkanRenderer::createGraphicsPipeline()
     rasterizer.depthBiasClamp = 0.0F;
     rasterizer.depthBiasSlopeFactor = 0.0F;
 
-    auto sampleCountFlagBits = m_window->sampleCountFlagBits();
-
-    m_msaa = sampleCountFlagBits > VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT;
-    qDebug() << "MSAA: " << m_msaa;
-    qDebug() << "sampleCountFlagBits: " << sampleCountFlagBits;
-
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_TRUE;
-    multisampling.rasterizationSamples = sampleCountFlagBits;
+    multisampling.rasterizationSamples = m_window->sampleCountFlagBits();
     multisampling.minSampleShading = 0.2F;
     multisampling.pSampleMask = nullptr;
     multisampling.alphaToCoverageEnable = VK_FALSE;
@@ -400,7 +391,9 @@ void VulkanRenderer::createGraphicsPipeline()
     pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
-    checkVkResult(m_devFuncs->vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout),
+
+    PipelineWithLayout pipelineWithLayout{};
+    checkVkResult(m_devFuncs->vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &pipelineWithLayout.layout),
                   "failed to create pipeline layout");
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -415,13 +408,14 @@ void VulkanRenderer::createGraphicsPipeline()
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = nullptr;
-    pipelineInfo.layout = m_pipelineLayout;
+    pipelineInfo.layout = pipelineWithLayout.layout;
     pipelineInfo.renderPass = m_window->defaultRenderPass();
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
-    checkVkResult(m_devFuncs->vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline),
+    checkVkResult(m_devFuncs->vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipelineWithLayout.pipeline),
                   "failed to create graphics pipeline");
+    return pipelineWithLayout;
 }
 
 void VulkanRenderer::createVertexBuffer()
@@ -540,17 +534,17 @@ void VulkanRenderer::startNextFrame()
     renderPassInfo.framebuffer = m_window->currentFramebuffer();
     renderPassInfo.renderArea = createVkRect2D(m_window->swapChainImageSize());
     auto clearValues = createClearValues();
-    renderPassInfo.clearValueCount = m_msaa ? 3 : 2;
+    renderPassInfo.clearValueCount = m_window->sampleCountFlagBits() > VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT ? 3 : 2;
     renderPassInfo.pClearValues = clearValues.data();
     VkCommandBuffer commandBuffer = m_window->currentCommandBuffer();
     m_devFuncs->vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
-    m_devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+    m_devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithLayout.pipeline);
 
     std::array vertexBuffers{m_vertexBuffer.buffer};
     std::array offsets{static_cast<VkDeviceSize>(0)};
     m_devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
 
-    m_devFuncs->vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0,
+    m_devFuncs->vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithLayout.layout, 0,
                                         1, &m_descriptorSets.at(m_window->currentSwapChainImageIndex()), 0, nullptr);
     m_devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT32);
 
@@ -613,7 +607,7 @@ void VulkanRenderer::updateUniformBuffer() const
     }
 }
 
-void VulkanRenderer::createDescriptorPool()
+VkDescriptorPool VulkanRenderer::createDescriptorPool() const
 {
     qDebug() << "Create descriptor pool";
     auto swapChainImageCount = m_window->swapChainImageCount();
@@ -631,11 +625,13 @@ void VulkanRenderer::createDescriptorPool()
     poolInfo.poolSizeCount = poolSizes.size();
     poolInfo.pPoolSizes = poolSizes.data();
     poolInfo.maxSets = swapChainImageCount;
-    checkVkResult(m_devFuncs->vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool),
+    VkDescriptorPool descriptorPool{};
+    checkVkResult(m_devFuncs->vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &descriptorPool),
                   "failed to create descriptor pool");
+    return descriptorPool;
 }
 
-void VulkanRenderer::createDescriptorSets()
+QVector<VkDescriptorSet> VulkanRenderer::createDescriptorSets() const
 {
     qDebug() << "Create descriptors sets";
     auto swapChainImageCount = m_window->swapChainImageCount();
@@ -645,63 +641,61 @@ void VulkanRenderer::createDescriptorSets()
     allocInfo.descriptorPool = m_descriptorPool;
     allocInfo.descriptorSetCount = swapChainImageCount;
     allocInfo.pSetLayouts = layouts.data();
-
-    m_descriptorSets.resize(swapChainImageCount);
-    checkVkResult(m_devFuncs->vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()),
+    QVector<VkDescriptorSet> descriptorSets{swapChainImageCount};
+    checkVkResult(m_devFuncs->vkAllocateDescriptorSets(m_device, &allocInfo, descriptorSets.data()),
                   "failed to allocate descriptor sets");
 
-    {
-        const auto *iVertUniformBuffers = m_vertUniformBuffers.cbegin();
-        const auto *iFragUniformBuffers = m_fragUniformBuffers.cbegin();
-        const auto *iDescriptorSets = m_descriptorSets.cbegin();
-        for (; iVertUniformBuffers != m_vertUniformBuffers.cend()
-             && iFragUniformBuffers != m_fragUniformBuffers.cend()
-             && iDescriptorSets != m_descriptorSets.cend();
-             ++iVertUniformBuffers, ++iFragUniformBuffers, ++iDescriptorSets) {
-            VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = iVertUniformBuffers->buffer;
-            bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(VertBindingObject);
+    const auto *iVertUniformBuffers = m_vertUniformBuffers.cbegin();
+    const auto *iFragUniformBuffers = m_fragUniformBuffers.cbegin();
+    const auto *iDescriptorSets = descriptorSets.cbegin();
+    for (; iVertUniformBuffers != m_vertUniformBuffers.cend()
+         && iFragUniformBuffers != m_fragUniformBuffers.cend()
+         && iDescriptorSets != descriptorSets.cend();
+         ++iVertUniformBuffers, ++iFragUniformBuffers, ++iDescriptorSets) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = iVertUniformBuffers->buffer;
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(VertBindingObject);
 
-            VkDescriptorImageInfo imageInfo{};
-            imageInfo.imageLayout = VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = m_textureImageView;
-            imageInfo.sampler = m_textureSampler;
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VkImageLayout::VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = m_textureImageView;
+        imageInfo.sampler = m_textureSampler;
 
-            VkDescriptorBufferInfo lightInfoBufferInfo{};
-            lightInfoBufferInfo.buffer = iFragUniformBuffers->buffer;
-            lightInfoBufferInfo.offset = 0;
-            lightInfoBufferInfo.range = sizeof(FragBindingObject);
+        VkDescriptorBufferInfo lightInfoBufferInfo{};
+        lightInfoBufferInfo.buffer = iFragUniformBuffers->buffer;
+        lightInfoBufferInfo.offset = 0;
+        lightInfoBufferInfo.range = sizeof(FragBindingObject);
 
-            std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
 
-            descriptorWrites[0].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[0].dstSet = *iDescriptorSets;
-            descriptorWrites[0].dstBinding = 0;
-            descriptorWrites[0].dstArrayElement = 0;
-            descriptorWrites[0].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrites[0].descriptorCount = 1;
-            descriptorWrites[0].pBufferInfo = &bufferInfo;
+        descriptorWrites[0].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].dstSet = *iDescriptorSets;
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].dstArrayElement = 0;
+        descriptorWrites[0].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-            descriptorWrites[1].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstSet = *iDescriptorSets;
-            descriptorWrites[1].dstBinding = 1;
-            descriptorWrites[1].dstArrayElement = 0;
-            descriptorWrites[1].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[1].descriptorCount = 1;
-            descriptorWrites[1].pImageInfo = &imageInfo;
+        descriptorWrites[1].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[1].dstSet = *iDescriptorSets;
+        descriptorWrites[1].dstBinding = 1;
+        descriptorWrites[1].dstArrayElement = 0;
+        descriptorWrites[1].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[1].descriptorCount = 1;
+        descriptorWrites[1].pImageInfo = &imageInfo;
 
-            descriptorWrites[2].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[2].dstSet = *iDescriptorSets;
-            descriptorWrites[2].dstBinding = 2;
-            descriptorWrites[2].dstArrayElement = 0;
-            descriptorWrites[2].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrites[2].descriptorCount = 1;
-            descriptorWrites[2].pBufferInfo = &lightInfoBufferInfo;
+        descriptorWrites[2].sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[2].dstSet = *iDescriptorSets;
+        descriptorWrites[2].dstBinding = 2;
+        descriptorWrites[2].dstArrayElement = 0;
+        descriptorWrites[2].descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[2].descriptorCount = 1;
+        descriptorWrites[2].pBufferInfo = &lightInfoBufferInfo;
 
-            m_devFuncs->vkUpdateDescriptorSets(m_device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
-        }
+        m_devFuncs->vkUpdateDescriptorSets(m_device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
     }
+    return descriptorSets;
 }
 
 void VulkanRenderer::createTextureImage()
@@ -1114,4 +1108,12 @@ void VulkanRenderer::destroyUniformBuffers(QVector<BufferWithMemory> &buffers) c
     for (auto &iBuffer : buffers) {
         destroyBufferWithMemory(iBuffer);
     }
+}
+
+void VulkanRenderer::destroyPipelineWithLayout(PipelineWithLayout &pipelineWithLayout) const
+{
+    qDebug() << "Destroy pipeline with layout";
+    m_devFuncs->vkDestroyPipeline(m_device, pipelineWithLayout.pipeline, nullptr);
+    m_devFuncs->vkDestroyPipelineLayout(m_device, pipelineWithLayout.layout, nullptr);
+    pipelineWithLayout = {};
 }

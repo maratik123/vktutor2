@@ -127,12 +127,6 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
                 attrib.vertices[vi + 2]
             };
 
-            auto ti = 2 * index.texcoord_index;
-            vertex.texCoord = {
-                attrib.texcoords[ti + 0],
-                1.0F - attrib.texcoords[ti + 1]
-            };
-
             auto ni = 3 * index.normal_index;
             vertex.normal = glm::normalize(glm::vec3{
                 attrib.normals[ni + 0],
@@ -141,6 +135,11 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
             });
 
             auto iUniqueVertices = uniqueVertices.constFind(vertex);
+            auto ti = 2 * index.texcoord_index;
+            vertex.texCoord = {
+                attrib.texcoords[ti + 0],
+                1.0F - attrib.texcoords[ti + 1]
+            };
 
             if (iUniqueVertices == uniqueVertices.cend()) {
                 iUniqueVertices = static_cast<decltype(iUniqueVertices)>(uniqueVertices.insert(vertex, result.vertices.size()));

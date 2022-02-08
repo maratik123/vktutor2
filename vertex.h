@@ -7,19 +7,18 @@
 
 #include <QVulkanInstance>
 
-struct Vertex
+struct ModelVertex
 {
     glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord;
     glm::vec3 normal;
+    glm::vec2 texCoord;
 
-    [[nodiscard]] bool operator==(const Vertex &other) const;
+    [[nodiscard]] bool operator==(const ModelVertex &other) const;
 
     [[nodiscard]] static VkVertexInputBindingDescription createBindingDescription();
-    [[nodiscard]] static std::array<VkVertexInputAttributeDescription, 4> createAttributeDescriptions();
+    [[nodiscard]] static std::array<VkVertexInputAttributeDescription, 3> createAttributeDescriptions();
 };
 
-uint qHash(const Vertex &key, uint seed = 0) noexcept;
+uint qHash(const ModelVertex &key, uint seed = 0) noexcept;
 
 #endif // VERTEX_H

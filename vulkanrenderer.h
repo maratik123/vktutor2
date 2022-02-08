@@ -3,7 +3,7 @@
 
 #include <QVulkanWindowRenderer>
 
-class Vertex;
+class ModelVertex;
 
 struct BufferWithMemory {
     VkBuffer buffer;
@@ -53,7 +53,7 @@ private:
     VkDescriptorPool m_descriptorPool;
     QVector<VkDescriptorSet> m_descriptorSets;
 
-    QVector<Vertex> m_vertices;
+    QVector<ModelVertex> m_vertices;
     QVector<uint32_t> m_indices;
 
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code) const;

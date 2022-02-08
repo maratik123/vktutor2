@@ -115,19 +115,17 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
     }
 
     Model result{};
-    QHash<Vertex, uint32_t> uniqueVertices{};
+    QHash<ModelVertex, uint32_t> uniqueVertices{};
 
     for (const auto &shape : shapes) {
         for (const auto &index : shape.mesh.indices) {
-            Vertex vertex{};
+            ModelVertex vertex{};
             auto vi = 3 * index.vertex_index;
             vertex.pos = {
                 attrib.vertices[vi + 0],
                 attrib.vertices[vi + 1],
                 attrib.vertices[vi + 2]
             };
-
-            vertex.color = {1.0F, 1.0F, 1.0F};
 
             auto ti = 2 * index.texcoord_index;
             vertex.texCoord = {

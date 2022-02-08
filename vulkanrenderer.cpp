@@ -139,6 +139,7 @@ void VulkanRenderer::preInitResources()
             VkFormat::VK_FORMAT_B8G8R8A8_UNORM
     });
     loadModel();
+    m_window->setPhysicalDeviceIndex(0);
     {
         auto supportedSampleCounts = m_window->supportedSampleCounts();
         m_window->setSampleCount(supportedSampleCounts.constLast());
@@ -296,8 +297,8 @@ void VulkanRenderer::createGraphicsPipeline()
     fragShaderStageInfo.module = fragShaderModule;
     fragShaderStageInfo.pName = "main";
 
-    auto bindingDescription = Vertex::createBindingDescription();
-    auto attributeDescriptions = Vertex::createAttributeDescriptions();
+    auto bindingDescription = ModelVertex::createBindingDescription();
+    auto attributeDescriptions = ModelVertex::createAttributeDescriptions();
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;

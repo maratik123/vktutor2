@@ -527,7 +527,7 @@ BufferWithMemory VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFl
 
 void VulkanRenderer::startNextFrame()
 {
-    updateUniformBuffer();
+    updateUniformBuffers();
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = m_window->defaultRenderPass();
@@ -554,7 +554,7 @@ void VulkanRenderer::startNextFrame()
     m_window->requestUpdate();
 }
 
-void VulkanRenderer::updateUniformBuffer() const
+void VulkanRenderer::updateUniformBuffers() const
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
 

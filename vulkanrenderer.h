@@ -101,7 +101,7 @@ private:
     void endSingleTimeCommands(VkCommandBuffer commandBuffer) const;
 
 
-    void updateUniformBuffer() const;
+    void updateUniformBuffers() const;
 
     void destroyBufferWithMemory(BufferWithMemory &buffer) const;
     void destroyImageWithMemory(ImageWithMemory &image) const;

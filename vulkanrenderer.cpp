@@ -440,7 +440,7 @@ PipelineWithLayout VulkanRenderer::createGraphicsPipeline() const
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
-    checkVkResult(m_devFuncs->vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipelineWithLayout.pipeline),
+    checkVkResult(m_devFuncs->vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &pipelineInfo, nullptr, &pipelineWithLayout.pipeline),
                   "failed to create graphics pipeline");
     return pipelineWithLayout;
 }

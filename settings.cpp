@@ -44,15 +44,24 @@ void Settings::loadSettings(QWindow &w)
     settings.endGroup();
 }
 
-constexpr int pipelineCacheLayoutVersion = 1;
+enum class PipelineCacheLayoutVersion : int
+{
+    PLANE = 0,
+    COMPRESS = 1
+};
+
+constexpr PipelineCacheLayoutVersion pipelineCacheLayoutVersion = PipelineCacheLayoutVersion::COMPRESS;
 
 void Settings::savePipelineCache(const QByteArray &cache)
 {
     QSettings settings{};
     settings.beginGroup(graphics);
-    auto compressedCache = qCompress(cache, 9);
-    settings.setValue(pipelineCache, compressedCache);
-    settings.setValue(pipelineCacheLayoutVersionName, pipelineCacheLayoutVersion);
+    QByteArray convertedCache = cache;
+    if (pipelineCacheLayoutVersion == PipelineCacheLayoutVersion::COMPRESS) {
+        convertedCache = qCompress(convertedCache, 9);
+    }
+    settings.setValue(pipelineCache, convertedCache);
+    settings.setValue(pipelineCacheLayoutVersionName, static_cast<int>(pipelineCacheLayoutVersion));
     settings.endGroup();
     qDebug() << "Save pipeline cache to: " << settings.fileName();
 }
@@ -62,16 +71,21 @@ QByteArray Settings::loadPipelineCache()
     QSettings settings{};
     qDebug() << "Load pipeline cache from: " << settings.fileName();
     settings.beginGroup(graphics);
-    QByteArray result{};
-    auto version = settings.value(pipelineCacheLayoutVersionName).toInt();
-    if (version == pipelineCacheLayoutVersion) {
-        result = settings.value(pipelineCache).toByteArray();
+    auto result = settings.value(pipelineCache).toByteArray();
+    auto version = static_cast<PipelineCacheLayoutVersion>(settings.value(pipelineCacheLayoutVersionName).toInt());
+    switch (version) {
+    case PipelineCacheLayoutVersion::COMPRESS:
         result = qUncompress(result);
-        if (result.isEmpty()) {
-            qDebug() << "Can not fetch stored pipeline cache";
-        }
-    } else {
-        qDebug() << "Stored version: " << version << ", expected: " << pipelineCacheLayoutVersion << ", discarding";
+        break;
+    case PipelineCacheLayoutVersion::PLANE:
+        break;
+    default:
+        qDebug() << "Unknown pipeline cache layout version: " << static_cast<int>(version);
+        result = {};
+        break;
+    }
+    if (result.isEmpty()) {
+        qDebug() << "Can not fetch stored pipeline cache";
     }
     settings.endGroup();
     return result;

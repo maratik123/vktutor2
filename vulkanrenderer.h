@@ -45,7 +45,8 @@ private:
     VkDevice m_device;
     QVulkanDeviceFunctions *m_devFuncs;
 
-    VkDescriptorSetLayout m_descriptorSetLayout;
+    VkPipelineCache m_pipelineCache;
+    std::array<VkDescriptorSetLayout, 1> m_descriptorSetLayouts;
     PipelineWithLayout m_graphicsPipelineWithLayout;
     BufferWithMemory m_vertexBuffer;
     BufferWithMemory m_indexBuffer;
@@ -63,7 +64,11 @@ private:
     QVector<uint32_t> m_indices;
 
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code) const;
-    [[nodiscard]] VkDescriptorSetLayout createDescriptorSetLayout() const;
+
+    void savePipelineCache() const;
+    void createPipelineCache();
+
+    [[nodiscard]] std::array<VkDescriptorSetLayout, 1> createDescriptorSetLayouts() const;
     [[nodiscard]] PipelineWithLayout createGraphicsPipeline() const;
     [[nodiscard]] VkDescriptorPool createDescriptorPool() const;
     [[nodiscard]] QVector<VkDescriptorSet> createDescriptorSets() const;
@@ -76,7 +81,7 @@ private:
     void createVertUniformBuffers();
     void createFragUniformBuffers();
     template<typename T>
-    void createUniformBuffers(QVector<BufferWithMemory> &buffers) const;
+    void createUniformBuffers(QVector<BufferWithMemory> &buffers) const { createUniformBuffers(buffers, sizeof(T)); }
     void createUniformBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const;
 
     void createTextureImage();

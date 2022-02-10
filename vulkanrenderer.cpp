@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "glm.h"
 #include "model.h"
+#include "settings.h"
 #include "vertex.h"
 
 #include <algorithm>
@@ -20,8 +21,10 @@
 #include <QVulkanFunctions>
 
 namespace {
-const QString vertShaderName = QStringLiteral(":/shaders/shader.vert.spv");
-const QString fragShaderName = QStringLiteral(":/shaders/shader.frag.spv");
+const QString texVertShaderName = QStringLiteral(":/shaders/tex.vert.spv");
+const QString texFragShaderName = QStringLiteral(":/shaders/tex.frag.spv");
+const QString colorVertShaderName = QStringLiteral(":/shaders/color.vert.spv");
+const QString colorFragShaderName = QStringLiteral(":/shaders/color.frag.spv");
 const QString textureName = QStringLiteral(":/textures/viking_room.png");
 const QString modelDirName = QStringLiteral(":/models");
 const QString modelName = QStringLiteral("viking_room.obj");
@@ -107,6 +110,25 @@ constexpr VkImageAspectFlags evalAspectFlags(VkImageLayout newLayout, VkFormat f
     }
     return VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT | VkImageAspectFlagBits::VK_IMAGE_ASPECT_STENCIL_BIT;
 }
+
+const std::array<ColorVertex, 8> lightCubeVertices{
+    ColorVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}},
+    ColorVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}},
+    ColorVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}},
+    ColorVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}},
+    ColorVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}},
+    ColorVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}},
+    ColorVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}},
+    ColorVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}}
+};
+constexpr std::array<uint16_t, 36> lightCubeIndices{
+    0, 1, 2, 2, 3, 0,
+    6, 5, 4, 4, 7, 6,
+    4, 0, 3, 3, 7, 4,
+    2, 1, 5, 5, 6, 2,
+    7, 3, 2, 2, 6, 7,
+    1, 0, 4, 4, 5, 1
+};
 }
 
 VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
@@ -116,7 +138,8 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_physDevice{}
     , m_device{}
     , m_devFuncs{}
-    , m_descriptorSetLayout{}
+    , m_pipelineCache{}
+    , m_descriptorSetLayouts{}
     , m_graphicsPipelineWithLayout{}
     , m_vertexBuffer{}
     , m_indexBuffer{}
@@ -151,7 +174,8 @@ void VulkanRenderer::initResources()
     m_physDevice = m_window->physicalDevice();
     m_device = m_window->device();
     m_devFuncs = m_vkInst->deviceFunctions(m_device);
-    m_descriptorSetLayout = createDescriptorSetLayout();
+    createPipelineCache();
+    m_descriptorSetLayouts = createDescriptorSetLayouts();
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
@@ -193,8 +217,11 @@ void VulkanRenderer::releaseResources()
     m_devFuncs->vkDestroyImageView(m_device, m_textureImageView, nullptr);
     m_textureImageView = {};
     destroyImageWithMemory(m_textureImage);
-    m_devFuncs->vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
-    m_descriptorSetLayout = {};
+    m_devFuncs->vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayouts[0], nullptr);
+    m_descriptorSetLayouts = {};
+    savePipelineCache();
+    m_devFuncs->vkDestroyPipelineCache(m_device, m_pipelineCache, nullptr);
+    m_pipelineCache = {};
     m_devFuncs = {};
     m_device = {};
     m_physDevice = {};
@@ -226,7 +253,7 @@ VkShaderModule VulkanRenderer::createShaderModule(const QByteArray &code) const
     return shaderModule;
 }
 
-VkDescriptorSetLayout VulkanRenderer::createDescriptorSetLayout() const
+std::array<VkDescriptorSetLayout, 1> VulkanRenderer::createDescriptorSetLayouts() const
 {
     qDebug() << "Create descriptor set layout";
 
@@ -260,7 +287,7 @@ VkDescriptorSetLayout VulkanRenderer::createDescriptorSetLayout() const
     VkDescriptorSetLayout descriptorSetLayout{};
     checkVkResult(m_devFuncs->vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &descriptorSetLayout),
                   "failed to create descriptor set layout");
-    return descriptorSetLayout;
+    return {descriptorSetLayout};
 }
 
 PipelineWithLayout VulkanRenderer::createGraphicsPipeline() const
@@ -268,14 +295,14 @@ PipelineWithLayout VulkanRenderer::createGraphicsPipeline() const
     qDebug() << "Create graphics pipeline";
     VkShaderModule vertShaderModule{};
     {
-        auto vertShaderCode = readFile(vertShaderName);
+        auto vertShaderCode = readFile(texVertShaderName);
         vertShaderModule = createShaderModule(vertShaderCode);
     }
     auto vertGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkDestroyShaderModule(m_device, vertShaderModule, nullptr); });
 
     VkShaderModule fragShaderModule{};
     {
-        auto fragShaderCode = readFile(fragShaderName);
+        auto fragShaderCode = readFile(texFragShaderName);
         fragShaderModule = createShaderModule(fragShaderCode);
     }
     auto fragGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkDestroyShaderModule(m_device, fragShaderModule, nullptr); });
@@ -387,8 +414,8 @@ PipelineWithLayout VulkanRenderer::createGraphicsPipeline() const
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
+    pipelineLayoutInfo.setLayoutCount = m_descriptorSetLayouts.size();
+    pipelineLayoutInfo.pSetLayouts = m_descriptorSetLayouts.data();
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
@@ -476,12 +503,6 @@ void VulkanRenderer::createFragUniformBuffers()
     qDebug() << "Create fragment uniform buffers";
 
     createUniformBuffers<FragBindingObject>(m_fragUniformBuffers);
-}
-
-template<typename T>
-void VulkanRenderer::createUniformBuffers(QVector<BufferWithMemory> &buffers) const
-{
-    createUniformBuffers(buffers, sizeof(T));
 }
 
 void VulkanRenderer::createUniformBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const
@@ -635,7 +656,7 @@ QVector<VkDescriptorSet> VulkanRenderer::createDescriptorSets() const
 {
     qDebug() << "Create descriptors sets";
     auto swapChainImageCount = m_window->swapChainImageCount();
-    QVector<VkDescriptorSetLayout> layouts{swapChainImageCount, m_descriptorSetLayout};
+    QVector<VkDescriptorSetLayout> layouts{swapChainImageCount, m_descriptorSetLayouts[0]};
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = m_descriptorPool;
@@ -1084,6 +1105,31 @@ void VulkanRenderer::loadModel()
     auto model = Model::loadModel(modelDirName, modelName);
     m_vertices.swap(model.vertices);
     m_indices.swap(model.indices);
+}
+
+void VulkanRenderer::createPipelineCache()
+{
+    qDebug() << "Create pipeline cache";
+    auto pipelineCacheData = Settings::loadPipelineCache();
+    VkPipelineCacheCreateInfo pipelineCacheInfo{};
+    pipelineCacheInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    pipelineCacheInfo.initialDataSize = pipelineCacheData.size();
+    pipelineCacheInfo.pInitialData = pipelineCacheData.constData();
+    checkVkResult(m_devFuncs->vkCreatePipelineCache(m_device, &pipelineCacheInfo, nullptr, &m_pipelineCache),
+                  "failed to create pipeline cache");
+}
+
+void VulkanRenderer::savePipelineCache() const
+{
+    qDebug() << "Save pipeline cache";
+    size_t dataSize{};
+    checkVkResult(m_devFuncs->vkGetPipelineCacheData(m_device, m_pipelineCache, &dataSize, nullptr),
+                  "failed to get pipeline cache data size");
+    QByteArray pipelineCacheData{static_cast<int>(dataSize), char{}};
+    checkVkResult(m_devFuncs->vkGetPipelineCacheData(m_device, m_pipelineCache, &dataSize, pipelineCacheData.data()),
+                  "failed to get pipeline cache data");
+    pipelineCacheData.resize(static_cast<int>(dataSize));
+    Settings::savePipelineCache(pipelineCacheData);
 }
 
 void VulkanRenderer::destroyBufferWithMemory(BufferWithMemory &buffer) const

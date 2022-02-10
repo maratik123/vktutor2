@@ -148,8 +148,10 @@ add_compile_definitions(
 )
 
 set(resources)
-add_shader(resources shader.vert)
-add_shader(resources shader.frag)
+add_shader(resources color.vert)
+add_shader(resources color.frag)
+add_shader(resources tex.vert)
+add_shader(resources tex.frag)
 add_asset(resources textures/viking_room.png)
 add_asset(resources models/viking_room.obj)
 
@@ -165,6 +167,7 @@ set(PROJECT_SOURCES
     model.cpp model.h
     externals/scope_guard/scope_guard.hpp
     externals/tinyobjloader/tiny_obj_loader.h
+    settings.cpp settings.h
 )
 
 add_resources(GENERATED_SOURCES "${resources}")

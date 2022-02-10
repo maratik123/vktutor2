@@ -17,13 +17,13 @@ class DataStreamBuf
 public:
     explicit DataStreamBuf(QFile *file)
         : m_ds{file}
-        , m_buffer{}
+        , m_buffer{2048, char{}}
     {}
 
     int_type underflow() override;
 
 private:
-    std::array<char, 1024> m_buffer;
+    QByteArray m_buffer;
     QDataStream m_ds;
 };
 

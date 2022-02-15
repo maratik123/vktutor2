@@ -500,11 +500,11 @@ void TexPipeline::createTextureImageView()
 
 DescriptorPoolSizes TexPipeline::descriptorPoolSizes(int swapChainImageCount) const
 {
-    DescriptorPoolSizes poolSizes{};
-    poolSizes.poolSize = {
-        std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * swapChainImageCount),
-        std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, swapChainImageCount)
+    return {
+        {
+            std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * swapChainImageCount),
+            std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, swapChainImageCount)
+        },
+        static_cast<uint32_t>(swapChainImageCount)
     };
-    poolSizes.maxSets = swapChainImageCount;
-    return poolSizes;
 }

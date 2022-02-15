@@ -262,27 +262,21 @@ VkDescriptorPool VulkanRenderer::createDescriptorPool() const
     QVector<VkDescriptorPoolSize> poolSizes{};
     {
         QHash<VkDescriptorType, uint32_t> poolSizesDict{};
-        const auto *iPipeline = m_pipelines.cbegin();
-        if (iPipeline != m_pipelines.cend()) {
-            {
-                auto poolSizes = (*iPipeline)->descriptorPoolSizes(swapChainImageCount);
-                maxSets += poolSizes.maxSets;
-                poolSizesDict.swap(poolSizes.poolSize);
+        for (const auto &pipeline : m_pipelines) {
+            auto poolSizes = pipeline->descriptorPoolSizes(swapChainImageCount);
+            maxSets += poolSizes.maxSets;
+            poolSizesDict.reserve(poolSizes.poolSize.size());
+            for (auto iPoolSize = poolSizes.poolSize.cbegin(); iPoolSize != poolSizes.poolSize.cend(); ++iPoolSize) {
+                poolSizesDict[iPoolSize.key()] += iPoolSize.value();
             }
-            for (++iPipeline; iPipeline != m_pipelines.cend(); ++iPipeline) {
-                auto poolSizes = (*iPipeline)->descriptorPoolSizes(swapChainImageCount);
-                maxSets += poolSizes.maxSets;
-                for (auto iPoolSize = poolSizes.poolSize.cbegin(); iPoolSize != poolSizes.poolSize.cend(); ++iPoolSize) {
-                    poolSizesDict[iPoolSize.key()] += iPoolSize.value();
-                }
-            }
-            poolSizes.reserve(poolSizesDict.size());
-            for (auto iPoolSize = poolSizesDict.cbegin(); iPoolSize != poolSizesDict.cend(); ++iPoolSize) {
-                VkDescriptorPoolSize entry{};
-                entry.type = iPoolSize.key();
-                entry.descriptorCount = iPoolSize.value();
-                poolSizes << entry;
-            }
+        }
+        poolSizes.reserve(poolSizesDict.size());
+        for (auto iPoolSize = poolSizesDict.cbegin(); iPoolSize != poolSizesDict.cend(); ++iPoolSize) {
+            VkDescriptorPoolSize entry{};
+            entry.type = iPoolSize.key();
+            entry.descriptorCount = iPoolSize.value();
+            poolSizes << entry;
+            qDebug() << "Descriptor entry: (" << iPoolSize.key() << ", " << iPoolSize.value() << ")";
         }
     }
 
@@ -350,7 +344,13 @@ void VulkanRenderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_
 
         blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
         blit.srcSubresource.mipLevel = i - 1;
-        blit.dstOffsets[1] = {mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1};
+        if (mipWidth > 1) {
+            mipWidth /= 2;
+        }
+        if (mipHeight > 1) {
+            mipHeight /= 2;
+        }
+        blit.dstOffsets[1] = {mipWidth, mipHeight, 1};
         blit.dstSubresource.mipLevel = i;
 
         m_devFuncs->vkCmdBlitImage(commandBuffer,
@@ -371,13 +371,9 @@ void VulkanRenderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_
                                          0, nullptr,
                                          0, nullptr,
                                          1, &barrier);
-        if (mipWidth > 1) {
-            mipWidth /= 2;
-        }
-        if (mipHeight > 1) {
-            mipHeight /= 2;
-        }
     }
+
+    qDebug() << "Generating level: " << mipLevels << ", mipWidth: " << mipWidth << ", mipHeight: " << mipHeight;
 
     barrier.subresourceRange.baseMipLevel = mipLevels - 1;
     barrier.oldLayout = VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;

@@ -258,19 +258,39 @@ VkDescriptorPool VulkanRenderer::createDescriptorPool() const
     qDebug() << "Create descriptor pool";
     auto swapChainImageCount = m_window->swapChainImageCount();
 
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
-    poolSizes[0].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = swapChainImageCount;
-    poolSizes[1].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = swapChainImageCount;
-    poolSizes[2].type = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[2].descriptorCount = swapChainImageCount;
+    uint32_t maxSets{};
+    QVector<VkDescriptorPoolSize> poolSizes{};
+    {
+        QHash<VkDescriptorType, uint32_t> poolSizesDict{};
+        const auto *iPipeline = m_pipelines.cbegin();
+        if (iPipeline != m_pipelines.cend()) {
+            {
+                auto poolSizes = (*iPipeline)->descriptorPoolSizes(swapChainImageCount);
+                maxSets += poolSizes.maxSets;
+                poolSizesDict.swap(poolSizes.poolSize);
+            }
+            for (++iPipeline; iPipeline != m_pipelines.cend(); ++iPipeline) {
+                auto poolSizes = (*iPipeline)->descriptorPoolSizes(swapChainImageCount);
+                maxSets += poolSizes.maxSets;
+                for (auto iPoolSize = poolSizes.poolSize.cbegin(); iPoolSize != poolSizes.poolSize.cend(); ++iPoolSize) {
+                    poolSizesDict[iPoolSize.key()] += iPoolSize.value();
+                }
+            }
+            poolSizes.reserve(poolSizesDict.size());
+            for (auto iPoolSize = poolSizesDict.cbegin(); iPoolSize != poolSizesDict.cend(); ++iPoolSize) {
+                VkDescriptorPoolSize entry{};
+                entry.type = iPoolSize.key();
+                entry.descriptorCount = iPoolSize.value();
+                poolSizes << entry;
+            }
+        }
+    }
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = poolSizes.size();
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = swapChainImageCount;
+    poolInfo.maxSets = maxSets;
     VkDescriptorPool descriptorPool{};
     checkVkResult(m_devFuncs->vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &descriptorPool),
                   "failed to create descriptor pool");
@@ -627,8 +647,8 @@ void VulkanRenderer::destroyImageWithMemory(ImageWithMemory &image) const
 void VulkanRenderer::destroyUniformBuffers(QVector<BufferWithMemory> &buffers) const
 {
     qDebug() << "Destroy buffers";
-    for (auto &iBuffer : buffers) {
-        destroyBufferWithMemory(iBuffer);
+    for (auto &buffer : buffers) {
+        destroyBufferWithMemory(buffer);
     }
     buffers.clear();
 }

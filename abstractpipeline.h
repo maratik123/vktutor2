@@ -4,6 +4,7 @@
 class VulkanRenderer;
 
 #include <QVulkanInstance>
+#include <QHash>
 
 struct BufferWithMemory
 {
@@ -29,6 +30,12 @@ struct ShaderModules
     VkShaderModule frag;
 };
 
+struct DescriptorPoolSizes
+{
+    QHash<VkDescriptorType, uint32_t> poolSize;
+    uint32_t maxSets;
+};
+
 class AbstractPipeline
 {
 public:
@@ -44,6 +51,7 @@ public:
     virtual void preInitResources() = 0;
     virtual void initResources() = 0;
     virtual void initSwapChainResources() = 0;
+    [[nodiscard]] virtual DescriptorPoolSizes descriptorPoolSizes(int swapChainImageCount) const = 0;
     virtual void updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const = 0;
     virtual void drawCommands(VkCommandBuffer commandBuffer, int currentSwapChainImageIndex) const = 0;
     virtual void releaseSwapChainResources() = 0;

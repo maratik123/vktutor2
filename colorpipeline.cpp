@@ -66,3 +66,9 @@ void ColorPipeline::releaseResources()
 {
 
 }
+
+DescriptorPoolSizes ColorPipeline::descriptorPoolSizes(int swapChainImageCount) const
+{
+    Q_UNUSED(swapChainImageCount);
+    return {};
+}

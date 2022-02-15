@@ -497,3 +497,14 @@ void TexPipeline::createTextureImageView()
     qDebug() << "Create texture image view";
     m_textureImageView = vulkanRenderer()->createImageView(m_textureImage.image, textureFormat, m_mipLevels);
 }
+
+DescriptorPoolSizes TexPipeline::descriptorPoolSizes(int swapChainImageCount) const
+{
+    DescriptorPoolSizes poolSizes{};
+    poolSizes.poolSize = {
+        std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * swapChainImageCount),
+        std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, swapChainImageCount)
+    };
+    poolSizes.maxSets = swapChainImageCount;
+    return poolSizes;
+}

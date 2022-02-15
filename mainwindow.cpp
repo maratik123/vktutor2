@@ -12,5 +12,5 @@ MainWindow::MainWindow(QWindow *parent)
 QVulkanWindowRenderer *MainWindow::createRenderer()
 {
     qDebug() << "Creating renderer";
-    return new VulkanRenderer(this);
+    return new VulkanRenderer{this};
 }

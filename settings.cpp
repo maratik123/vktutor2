@@ -46,7 +46,7 @@ void Settings::loadSettings(QWindow &w)
 
 enum class PipelineCacheLayoutVersion : int
 {
-    PLANE = 0,
+    PLAIN = 0,
     COMPRESS = 1
 };
 
@@ -74,10 +74,10 @@ QByteArray Settings::loadPipelineCache()
     auto result = settings.value(pipelineCache).toByteArray();
     auto version = static_cast<PipelineCacheLayoutVersion>(settings.value(pipelineCacheLayoutVersionName).toInt());
     switch (version) {
+    case PipelineCacheLayoutVersion::PLAIN:
+        break;
     case PipelineCacheLayoutVersion::COMPRESS:
         result = qUncompress(result);
-        break;
-    case PipelineCacheLayoutVersion::PLANE:
         break;
     default:
         qDebug() << "Unknown pipeline cache layout version: " << static_cast<int>(version);

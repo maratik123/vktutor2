@@ -1,5 +1,4 @@
 #include "closeeventfilter.h"
-#include "constlatin1string.h"
 #include "mainwindow.h"
 #include "settings.h"
 #include "utils.h"

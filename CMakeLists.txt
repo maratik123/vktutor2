@@ -159,15 +159,18 @@ set(PROJECT_SOURCES
     main.cpp
     mainwindow.cpp mainwindow.h
     closeeventfilter.cpp closeeventfilter.h
-    constlatin1string.cpp constlatin1string.h
-    vulkanrenderer.cpp vulkanrenderer.h
+    vulkanrenderer.cpp vulkanrenderer_tmpl.cpp vulkanrenderer.h
     utils.cpp utils.h
-    vertex.cpp vertex.h
+    texvertex.cpp texvertex.h
+    colorvertex.cpp colorvertex.h
     glm.h
     model.cpp model.h
     externals/scope_guard/scope_guard.hpp
     externals/tinyobjloader/tiny_obj_loader.h
     settings.cpp settings.h
+    abstractpipeline.cpp abstractpipeline.h
+    texpipeline.cpp texpipeline.h
+    colorpipeline.cpp colorpipeline.h
 )
 
 add_resources(GENERATED_SOURCES "${resources}")

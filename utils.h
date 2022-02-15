@@ -13,4 +13,6 @@ constexpr bool enableValidationLayers =
 #endif
 ;
 
+[[nodiscard]] QByteArray readFile(const QString &fileName);
+
 #endif // UTILS_H

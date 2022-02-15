@@ -32,7 +32,7 @@ DataStreamBuf::int_type DataStreamBuf::underflow()
     if (gptr() == egptr()) {
         auto size = m_ds.readRawData(m_buffer.data(), static_cast<int>(m_buffer.size()));
         if (size == -1) {
-            throw std::runtime_error("can not read data to buffer");
+            throw std::runtime_error{"can not read data to buffer"};
         }
         setg(m_buffer.begin(), m_buffer.begin(), m_buffer.begin() + size);
         if (gptr() == egptr()) {
@@ -90,9 +90,8 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
         QFile file{baseDir.filePath(fileName)};
         qDebug() << "Load model: " << file;
         if (!file.open(QFile::OpenModeFlag::ReadOnly)) {
-            throw std::runtime_error("File can not be opened");
+            throw std::runtime_error{"File can not be opened"};
         }
-        file.open(QFile::OpenModeFlag::ReadOnly);
         DataStreamBuf dsbuf{&file};
         std::istream in{&dsbuf};
 
@@ -104,7 +103,11 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
         std::vector<tinyobj::material_t> materials{};
 
         if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, &in, &mr)) {
-            throw std::runtime_error("Warn: " + warn + ", err: " + err);
+            std::string message{"Warn: "};
+            message += warn;
+            message += ", err: ";
+            message += err;
+            throw std::runtime_error{message};
         }
         if (!warn.empty()) {
             qDebug() << "Warn: " << warn.c_str();
@@ -115,11 +118,11 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
     }
 
     Model result{};
-    QHash<ModelVertex, uint32_t> uniqueVertices{};
+    QHash<TexVertex, uint32_t> uniqueVertices{};
 
     for (const auto &shape : shapes) {
         for (const auto &index : shape.mesh.indices) {
-            ModelVertex vertex{};
+            TexVertex vertex{};
             auto vi = 3 * index.vertex_index;
             vertex.pos = {
                 attrib.vertices[vi + 0],
@@ -134,24 +137,26 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
                 attrib.normals[ni + 2]
             });
 
-            auto iUniqueVertices = uniqueVertices.constFind(vertex);
             auto ti = 2 * index.texcoord_index;
             vertex.texCoord = {
                 attrib.texcoords[ti + 0],
                 1.0F - attrib.texcoords[ti + 1]
             };
 
-            if (iUniqueVertices == uniqueVertices.cend()) {
-                iUniqueVertices = static_cast<decltype(iUniqueVertices)>(uniqueVertices.insert(vertex, result.vertices.size()));
-                result.vertices.push_back(vertex);
+            if (auto iUniqueVertices = uniqueVertices.constFind(vertex);
+                    iUniqueVertices != uniqueVertices.cend()) {
+                result.indices << iUniqueVertices.value();
+                continue;
             }
-
-            result.indices.push_back(iUniqueVertices.value());
+            auto verticesSize = result.vertices.size();
+            uniqueVertices.insert(vertex, verticesSize);
+            result.indices << verticesSize;
+            result.vertices << vertex;
         }
     }
 
-    qDebug() << "Vertices: " << result.vertices.size();
-    qDebug() << "Indices: " << result.indices.size();
+    qDebug() << "Vertices: " << result.vertices.size() << " (" << result.vertices.size() * sizeof(decltype(result.vertices)::value_type) << " bytes)";
+    qDebug() << "Indices: " << result.indices.size() << " (" << result.indices.size() * sizeof(decltype(result.indices)::value_type) << " bytes)";
 
     return result;
 }

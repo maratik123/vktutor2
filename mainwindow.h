@@ -3,7 +3,7 @@
 
 #include <QVulkanWindow>
 
-class MainWindow : public QVulkanWindow
+class MainWindow final : public QVulkanWindow
 {
     Q_OBJECT
 

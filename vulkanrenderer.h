@@ -5,7 +5,7 @@
 
 #include "abstractpipeline.h"
 
-class VulkanRenderer : public QVulkanWindowRenderer
+class VulkanRenderer final : public QVulkanWindowRenderer
 {
 public:
     explicit VulkanRenderer(QVulkanWindow *w);

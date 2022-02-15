@@ -106,7 +106,7 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
 
         glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
-        fragUbo->ambientColor = {0.1F, 0.1F, 0.1F, 1.0F};
+        fragUbo->ambientColor = {0.01F, 0.01F, 0.01F, 1.0F};
         fragUbo->diffuseLightPos = modelDiffuseLightPos * glm::vec4(-2.0F, 2.0F, 1.0F, 1.0F);
         fragUbo->diffuseLightColor = {1.0F, 1.0F, 0.0F, 1.0F};
     }

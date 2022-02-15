@@ -11,7 +11,7 @@
 #include <QVector>
 
 namespace {
-class DataStreamBuf
+class DataStreamBuf final
         : public std::streambuf
 {
 public:
@@ -42,7 +42,8 @@ DataStreamBuf::int_type DataStreamBuf::underflow()
     return std::char_traits<char>::to_int_type(*gptr());
 }
 
-class MaterialDirReader : public tinyobj::MaterialReader
+class MaterialDirReader final
+        : public tinyobj::MaterialReader
 {
 public:
     explicit MaterialDirReader(QDir *dir)
@@ -120,27 +121,31 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
     Model result{};
     QHash<TexVertex, uint32_t> uniqueVertices{};
 
+    qDebug() << "Shapes: " << shapes.size();
     for (const auto &shape : shapes) {
+        auto meshSize = static_cast<int>(shape.mesh.indices.size());
+        qDebug() << "Mesh indices: " << meshSize;
+        result.indices.reserve(result.indices.size() + meshSize);
+        result.vertices.reserve(result.vertices.size() + meshSize);
         for (const auto &index : shape.mesh.indices) {
-            TexVertex vertex{};
             auto vi = 3 * index.vertex_index;
-            vertex.pos = {
-                attrib.vertices[vi + 0],
-                attrib.vertices[vi + 1],
-                attrib.vertices[vi + 2]
-            };
-
             auto ni = 3 * index.normal_index;
-            vertex.normal = glm::normalize(glm::vec3{
-                attrib.normals[ni + 0],
-                attrib.normals[ni + 1],
-                attrib.normals[ni + 2]
-            });
-
             auto ti = 2 * index.texcoord_index;
-            vertex.texCoord = {
-                attrib.texcoords[ti + 0],
-                1.0F - attrib.texcoords[ti + 1]
+            TexVertex vertex{
+                {
+                    attrib.vertices[vi + 0],
+                    attrib.vertices[vi + 1],
+                    attrib.vertices[vi + 2]
+                },
+                glm::normalize(glm::vec3{
+                    attrib.normals[ni + 0],
+                    attrib.normals[ni + 1],
+                    attrib.normals[ni + 2]
+                }),
+                {
+                    attrib.texcoords[ti + 0],
+                    1.0F - attrib.texcoords[ti + 1]
+                }
             };
 
             if (auto iUniqueVertices = uniqueVertices.constFind(vertex);
@@ -154,9 +159,10 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
             result.vertices << vertex;
         }
     }
+    result.vertices.squeeze();
 
-    qDebug() << "Vertices: " << result.vertices.size() << " (" << result.vertices.size() * sizeof(decltype(result.vertices)::value_type) << " bytes)";
-    qDebug() << "Indices: " << result.indices.size() << " (" << result.indices.size() * sizeof(decltype(result.indices)::value_type) << " bytes)";
+    qDebug() << "Vertices: " << result.vertices.size() << " (" << result.vertices.size() * sizeof(decltype(result.vertices)::value_type) << " bytes )";
+    qDebug() << "Indices: " << result.indices.size() << " (" << result.indices.size() * sizeof(decltype(result.indices)::value_type) << " bytes )";
 
     return result;
 }

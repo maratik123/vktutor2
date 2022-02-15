@@ -3,7 +3,7 @@
 
 #include <QObject>
 
-class CloseEventFilter : public QObject
+class CloseEventFilter final : public QObject
 {
     Q_OBJECT
 

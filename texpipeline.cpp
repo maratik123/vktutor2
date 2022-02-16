@@ -70,6 +70,17 @@ void TexPipeline::initSwapChainResources()
     m_graphicsPipelineWithLayout = createGraphicsPipeline();
 }
 
+DescriptorPoolSizes TexPipeline::descriptorPoolSizes(int swapChainImageCount) const
+{
+    return {
+        {
+            std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * swapChainImageCount),
+            std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, swapChainImageCount)
+        },
+        static_cast<uint32_t>(swapChainImageCount)
+    };
+}
+
 void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const
 {
     auto *devFuncs = vulkanRenderer()->devFuncs();
@@ -81,7 +92,7 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
 
         VulkanRenderer::checkVkResult(devFuncs->vkMapMemory(device, vertUniformBufferMemory, 0, sizeof(VertBindingObject), {}, reinterpret_cast<void **>(&vertUbo)),
                                       "failed to map uniform buffer object memory");
-        auto mapGuard = sg::make_scope_guard([&, this]{ devFuncs->vkUnmapMemory(device, vertUniformBufferMemory); });
+        auto mapGuard = sg::make_scope_guard([&]{ devFuncs->vkUnmapMemory(device, vertUniformBufferMemory); });
 
         vertUbo->model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
@@ -102,12 +113,12 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
 
         VulkanRenderer::checkVkResult(devFuncs->vkMapMemory(device, fragUniformBufferMemory, 0, sizeof(FragBindingObject), {}, reinterpret_cast<void **>(&fragUbo)),
                                       "failed to map light info memory");
-        auto mapGuard = sg::make_scope_guard([&, this]{ devFuncs->vkUnmapMemory(device, fragUniformBufferMemory); });
+        auto mapGuard = sg::make_scope_guard([&]{ devFuncs->vkUnmapMemory(device, fragUniformBufferMemory); });
 
         glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
         fragUbo->ambientColor = {0.01F, 0.01F, 0.01F, 1.0F};
-        fragUbo->diffuseLightPos = modelDiffuseLightPos * glm::vec4(-2.0F, 2.0F, 1.0F, 1.0F);
+        fragUbo->diffuseLightPos = modelDiffuseLightPos * glm::vec4{-0.7F, 0.7F, 1.0F, 1.0F};
         fragUbo->diffuseLightColor = {1.0F, 1.0F, 0.0F, 1.0F};
     }
 }
@@ -139,10 +150,11 @@ void TexPipeline::releaseResources()
 {
     auto *devFuncs = vulkanRenderer()->devFuncs();
     VkDevice device = vulkanRenderer()->device();
+    devFuncs->vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
+    m_descriptorSetLayout = {};
     vulkanRenderer()->destroyShaderModules(m_shaderModules);
     vulkanRenderer()->destroyBufferWithMemory(m_indexBuffer);
     vulkanRenderer()->destroyBufferWithMemory(m_vertexBuffer);
-    devFuncs->vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
     devFuncs->vkDestroySampler(device, m_textureSampler, nullptr);
     m_textureSampler = {};
     devFuncs->vkDestroyImageView(device, m_textureImageView, nullptr);
@@ -447,7 +459,7 @@ void TexPipeline::createTextureImage()
         uint8_t *data{};
         VulkanRenderer::checkVkResult(devFuncs->vkMapMemory(device, stagingBuffer.memory, 0, imageSize, {}, reinterpret_cast<void **>(&data)),
                                       "failed to map texture staging buffer memory");
-        auto mapGuard = sg::make_scope_guard([&, this]{ devFuncs->vkUnmapMemory(device, stagingBuffer.memory); });
+        auto mapGuard = sg::make_scope_guard([&]{ devFuncs->vkUnmapMemory(device, stagingBuffer.memory); });
         std::copy_n(texture.constBits(), imageSize, data);
     } catch (...) {
         vulkanRenderer()->destroyBufferWithMemory(stagingBuffer);
@@ -455,13 +467,12 @@ void TexPipeline::createTextureImage()
     }
 
     auto bufferGuard = sg::make_scope_guard([&, this]{ vulkanRenderer()->destroyBufferWithMemory(stagingBuffer); });
+    VkImageUsageFlags usage = static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+            | VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT
+            | VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT;
 
     m_textureImage = vulkanRenderer()->createImage(texWidth, texHeight, m_mipLevels, VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
-                                 textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
-                                 static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-                                 | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                                 | static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT),
-                                 window->deviceLocalMemoryIndex());
+                                                   textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL, usage, window->deviceLocalMemoryIndex());
     vulkanRenderer()->transitionImageLayout(m_textureImage.image, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_mipLevels);
     vulkanRenderer()->copyBufferToImage(stagingBuffer.buffer, m_textureImage.image, texWidth, texHeight);
     vulkanRenderer()->generateMipmaps(m_textureImage.image, textureFormat, texWidth, texHeight, m_mipLevels);
@@ -496,15 +507,4 @@ void TexPipeline::createTextureImageView()
 {
     qDebug() << "Create texture image view";
     m_textureImageView = vulkanRenderer()->createImageView(m_textureImage.image, textureFormat, m_mipLevels);
-}
-
-DescriptorPoolSizes TexPipeline::descriptorPoolSizes(int swapChainImageCount) const
-{
-    return {
-        {
-            std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * swapChainImageCount),
-            std::make_pair(VkDescriptorType::VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, swapChainImageCount)
-        },
-        static_cast<uint32_t>(swapChainImageCount)
-    };
 }

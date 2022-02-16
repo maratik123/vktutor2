@@ -208,20 +208,35 @@ BufferWithMemory VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFl
     VkBuffer buffer{};
     checkVkResult(m_devFuncs->vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer),
                   "failed to create buffer");
+    try {
+        VkMemoryRequirements memRequirements{};
+        m_devFuncs->vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
 
-    VkMemoryRequirements memRequirements{};
-    m_devFuncs->vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = memoryTypeIndex;
-    VkDeviceMemory memory{};
-    checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &memory),
-                  "failed to allocate buffer memory");
-    checkVkResult(m_devFuncs->vkBindBufferMemory(m_device, buffer, memory, 0),
-                  "failed to bind vertex buffer to memory");
-    return {buffer, memory};
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = memoryTypeIndex;
+        VkDeviceMemory memory{};
+        checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &memory),
+                      "failed to allocate buffer memory");
+        try {
+            checkVkResult(m_devFuncs->vkBindBufferMemory(m_device, buffer, memory, 0),
+                          "failed to bind vertex buffer to memory");
+            return {buffer, memory};
+        } catch(...) {
+            auto guard = sg::make_scope_guard([&, this]{
+                auto guard2 = sg::make_scope_guard([&]{ buffer = {}; });
+                m_devFuncs->vkFreeMemory(m_device, memory, nullptr);
+            });
+            m_devFuncs->vkDestroyBuffer(m_device, buffer, nullptr);
+            throw;
+        }
+    } catch(...) {
+        if (buffer == nullptr) {
+            m_devFuncs->vkDestroyBuffer(m_device, buffer, nullptr);
+        }
+        throw;
+    }
 }
 
 void VulkanRenderer::startNextFrame()
@@ -422,21 +437,35 @@ ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, uin
     VkImage image{};
     checkVkResult(m_devFuncs->vkCreateImage(m_device, &imageInfo, nullptr, &image),
                   "failed to create image");
+    try {
+        VkMemoryRequirements memRequirements{};
+        m_devFuncs->vkGetImageMemoryRequirements(m_device, image, &memRequirements);
 
-    VkMemoryRequirements memRequirements{};
-    m_devFuncs->vkGetImageMemoryRequirements(m_device, image, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = memoryTypeIndex;
-    VkDeviceMemory memory{};
-    checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &memory),
-                  "failed to allocate image memory");
-
-    checkVkResult(m_devFuncs->vkBindImageMemory(m_device, image, memory, 0),
-                  "failed to bind image memory");
-    return {image, memory};
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = memoryTypeIndex;
+        VkDeviceMemory memory{};
+        checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &memory),
+                      "failed to allocate image memory");
+        try {
+            checkVkResult(m_devFuncs->vkBindImageMemory(m_device, image, memory, 0),
+                          "failed to bind image memory");
+            return {image, memory};
+        } catch(...) {
+            auto guard = sg::make_scope_guard([&, this] {
+                auto guard2 = sg::make_scope_guard([&]{ image = {}; });
+                m_devFuncs->vkFreeMemory(m_device, memory, nullptr);
+            });
+            m_devFuncs->vkDestroyImage(m_device, image, nullptr);
+            throw;
+        }
+    } catch(...) {
+        if (image == nullptr) {
+            m_devFuncs->vkDestroyImage(m_device, image, nullptr);
+        }
+        throw;
+    }
 }
 
 void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const

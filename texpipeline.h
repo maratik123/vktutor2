@@ -3,6 +3,7 @@
 
 #include "abstractpipeline.h"
 #include "texvertex.h"
+#include "vulkanrenderer.h"
 
 #include <QVector>
 

@@ -1,6 +1,7 @@
 #include "vulkanrenderer.h"
 
 #include "texvertex.h"
+#include "colorvertex.h"
 
 #include <QVulkanDeviceFunctions>
 
@@ -11,7 +12,7 @@ BufferWithMemory VulkanRenderer::createVertexBuffer(const QVector<T> &vertices) 
 {
     qDebug() << "Create vertex buffer";
 
-    return createBuffer(vertices, VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    return createBuffer<T>(vertices.cbegin(), vertices.cend(), VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 }
 
 template<typename T>
@@ -19,15 +20,31 @@ BufferWithMemory VulkanRenderer::createIndexBuffer(const QVector<T> &indices) co
 {
     qDebug() << "Create index buffer";
 
-    return createBuffer(indices, VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    return createBuffer<T>(indices.cbegin(), indices.cend(), VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 }
 
-template<typename T>
-BufferWithMemory VulkanRenderer::createBuffer(const QVector<T> &vec, VkBufferUsageFlags usage) const
+template<typename T, std::size_t Size>
+BufferWithMemory VulkanRenderer::createVertexBuffer(const std::array<T, Size> &vertices) const
+{
+    qDebug() << "Create vertex buffer";
+
+    return createBuffer<T>(vertices.cbegin(), vertices.cend(), VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+}
+
+template<typename T, std::size_t Size>
+BufferWithMemory VulkanRenderer::createIndexBuffer(const std::array<T, Size> &indices) const
+{
+    qDebug() << "Create index buffer";
+
+    return createBuffer<T>(indices.cbegin(), indices.cend(), VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
+
+template<typename T, typename Iterator>
+BufferWithMemory VulkanRenderer::createBuffer(Iterator begin, Iterator end, VkBufferUsageFlags usage) const
 {
     qDebug() << "Create buffer";
 
-    VkDeviceSize bufferSize = vec.size() * sizeof(T);
+    VkDeviceSize bufferSize = std::distance(begin, end) * sizeof(T);
 
     auto stagingBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex());
     auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
@@ -37,11 +54,11 @@ BufferWithMemory VulkanRenderer::createBuffer(const QVector<T> &vec, VkBufferUsa
                   "failed to map memory to staging buffer");
     {
         auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
-        std::copy(vec.cbegin(), vec.cend(), data);
+        std::copy(begin, end, data);
     }
 
     BufferWithMemory deviceBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
-                                  m_window->deviceLocalMemoryIndex());
+                                                 m_window->deviceLocalMemoryIndex());
 
     copyBuffer(stagingBuffer.buffer, deviceBuffer.buffer, bufferSize);
 
@@ -50,3 +67,5 @@ BufferWithMemory VulkanRenderer::createBuffer(const QVector<T> &vec, VkBufferUsa
 
 template BufferWithMemory VulkanRenderer::createVertexBuffer(const QVector<TexVertex> &vertices) const;
 template BufferWithMemory VulkanRenderer::createIndexBuffer(const QVector<uint32_t> &indices) const;
+template BufferWithMemory VulkanRenderer::createVertexBuffer(const std::array<ColorVertex, 8> &vertices) const;
+template BufferWithMemory VulkanRenderer::createIndexBuffer(const std::array<uint16_t, 36> &indices) const;

@@ -6,30 +6,6 @@ class VulkanRenderer;
 #include <QVulkanInstance>
 #include <QHash>
 
-struct BufferWithMemory
-{
-    VkBuffer buffer;
-    VkDeviceMemory memory;
-};
-
-struct ImageWithMemory
-{
-    VkImage image;
-    VkDeviceMemory memory;
-};
-
-struct PipelineWithLayout
-{
-    VkPipelineLayout layout;
-    VkPipeline pipeline;
-};
-
-struct ShaderModules
-{
-    VkShaderModule vert;
-    VkShaderModule frag;
-};
-
 struct DescriptorPoolSizes
 {
     QHash<VkDescriptorType, uint32_t> poolSize;

@@ -5,6 +5,30 @@
 
 #include "abstractpipeline.h"
 
+struct BufferWithMemory
+{
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+};
+
+struct ImageWithMemory
+{
+    VkImage image;
+    VkDeviceMemory memory;
+};
+
+struct PipelineWithLayout
+{
+    VkPipelineLayout layout;
+    VkPipeline pipeline;
+};
+
+struct ShaderModules
+{
+    VkShaderModule vert;
+    VkShaderModule frag;
+};
+
 class VulkanRenderer final : public QVulkanWindowRenderer
 {
 public:
@@ -21,6 +45,10 @@ public:
     [[nodiscard]] BufferWithMemory createVertexBuffer(const QVector<T> &vertices) const;
     template<typename T>
     [[nodiscard]] BufferWithMemory createIndexBuffer(const QVector<T> &indices) const;
+    template<typename T, std::size_t Size>
+    [[nodiscard]] BufferWithMemory createVertexBuffer(const std::array<T, Size> &vertices) const;
+    template<typename T, std::size_t Size>
+    [[nodiscard]] BufferWithMemory createIndexBuffer(const std::array<T, Size> &indices) const;
     static void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult expectedResult = VkResult::VK_SUCCESS);
     void destroyBufferWithMemory(BufferWithMemory &buffer) const;
     [[nodiscard]] QVulkanDeviceFunctions *devFuncs() const { return m_devFuncs; }
@@ -67,8 +95,8 @@ private:
 
     [[nodiscard]] VkDescriptorPool createDescriptorPool() const;
 
-    template<typename T>
-    [[nodiscard]] BufferWithMemory createBuffer(const QVector<T> &vec, VkBufferUsageFlags usage) const;
+    template<typename T, typename Iterator>
+    [[nodiscard]] BufferWithMemory createBuffer(Iterator begin, Iterator end, VkBufferUsageFlags usage) const;
 
     void createUniformBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const;
 

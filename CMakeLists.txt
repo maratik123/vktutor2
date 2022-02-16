@@ -167,10 +167,12 @@ set(PROJECT_SOURCES
     model.cpp model.h
     externals/scope_guard/scope_guard.hpp
     externals/tinyobjloader/tiny_obj_loader.h
+    externals/VulkanMemoryAllocator/include/vk_mem_alloc.h
     settings.cpp settings.h
     abstractpipeline.cpp abstractpipeline.h
     texpipeline.cpp texpipeline.h
     colorpipeline.cpp colorpipeline.h
+    vkmemalloc.cpp
 )
 
 add_resources(GENERATED_SOURCES "${resources}")

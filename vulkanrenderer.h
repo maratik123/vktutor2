@@ -120,7 +120,7 @@ private:
     [[nodiscard]] VkCommandBuffer beginSingleTimeCommands() const;
     void endSingleTimeCommands(VkCommandBuffer commandBuffer) const;
 
-    void updateUniformBuffers() const;
+    void updateUniformBuffers(int currentSwapChainImageIndex) const;
     [[nodiscard]] VmaAllocator createAllocator() const;
 };
 

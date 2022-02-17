@@ -192,6 +192,7 @@ void VulkanRenderer::createUniformBuffers(QVector<BufferWithAllocation> &buffers
     buffers.clear();
     buffers.reserve(swapChainImageCount);
     for (int i = 0; i < swapChainImageCount; ++i) {
+        vmaSetCurrentFrameIndex(m_allocator, i);
         buffers << createBuffer(size, VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
     }
 }
@@ -200,7 +201,7 @@ void VulkanRenderer::startNextFrame()
 {
     auto currentSwapChainImageIndex = m_window->currentSwapChainImageIndex();
     vmaSetCurrentFrameIndex(m_allocator, currentSwapChainImageIndex);
-    updateUniformBuffers();
+    updateUniformBuffers(currentSwapChainImageIndex);
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = m_window->defaultRenderPass();
@@ -219,7 +220,7 @@ void VulkanRenderer::startNextFrame()
     m_window->requestUpdate();
 }
 
-void VulkanRenderer::updateUniformBuffers() const
+void VulkanRenderer::updateUniformBuffers(int currentSwapChainImageIndex) const
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -227,8 +228,6 @@ void VulkanRenderer::updateUniformBuffers() const
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     auto swapChainImageSize = m_window->swapChainImageSize();
-
-    auto currentSwapChainImageIndex = m_window->currentSwapChainImageIndex();
 
     for (const auto &pipeline : m_pipelines) {
         pipeline->updateUniformBuffers(time, swapChainImageSize, currentSwapChainImageIndex);
@@ -634,7 +633,10 @@ void VulkanRenderer::savePipelineCache() const
 void VulkanRenderer::destroyUniformBuffers(QVector<BufferWithAllocation> &buffers) const
 {
     qDebug() << "Destroy buffers";
+    int i = 0;
     for (auto &buffer : buffers) {
+        vmaSetCurrentFrameIndex(m_allocator, i);
+        ++i;
         buffer.destroy(m_allocator);
     }
     buffers.clear();

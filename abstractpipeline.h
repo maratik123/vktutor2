@@ -5,8 +5,6 @@ class VulkanRenderer;
 
 #include <QVulkanInstance>
 #include <QHash>
-#include <QVector>
-#include <objectwithallocation.h>
 
 struct DescriptorPoolSizes
 {

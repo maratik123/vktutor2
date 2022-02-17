@@ -148,8 +148,7 @@ Model Model::loadModel(const QString &baseDirName, const QString &fileName)
                 }
             };
 
-            if (auto iUniqueVertices = uniqueVertices.constFind(vertex);
-                    iUniqueVertices != uniqueVertices.cend()) {
+            if (auto iUniqueVertices = uniqueVertices.constFind(vertex); iUniqueVertices != uniqueVertices.cend()) {
                 result.indices << iUniqueVertices.value();
                 continue;
             }

@@ -99,8 +99,7 @@ void VulkanRenderer::preInitResources()
         VkFormat::VK_FORMAT_B8G8R8A8_SRGB,
         VkFormat::VK_FORMAT_B8G8R8A8_UNORM
     });
-    {
-        auto supportedSampleCounts = m_window->supportedSampleCounts();
+    if (auto supportedSampleCounts = m_window->supportedSampleCounts(); !supportedSampleCounts.isEmpty()) {
         m_window->setSampleCount(supportedSampleCounts.constLast());
     }
     for (const auto &pipeline : m_pipelines) {
@@ -239,8 +238,17 @@ void VulkanRenderer::updateUniformBuffers(int currentSwapChainImageIndex) const
 
     auto swapChainImageSize = m_window->swapChainImageSize();
 
+    auto aspect = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
+
+    auto proj{glm::perspective(glm::radians(45.0F), aspect, 0.1F, 10.0F)};
+    proj[1][1] = -proj[1][1];
+
+    glm::mat4 view{glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F})};
+
+    auto projView{proj * view};
+
     for (const auto &pipeline : m_pipelines) {
-        pipeline->updateUniformBuffers(time, swapChainImageSize, currentSwapChainImageIndex);
+        pipeline->updateUniformBuffers(time, currentSwapChainImageIndex, proj, view, projView);
     }
 }
 

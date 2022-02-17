@@ -38,8 +38,7 @@ const QString colorVertShaderName = QStringLiteral(":/shaders/color.vert.spv");
 const QString colorFragShaderName = QStringLiteral(":/shaders/color.frag.spv");
 
 struct VertBindingObject {
-    alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 projView;
+    alignas(16) glm::mat4 projViewModel;
 };
 }
 
@@ -84,7 +83,7 @@ DescriptorPoolSizes ColorPipeline::descriptorPoolSizes(int swapChainImageCount) 
     };
 }
 
-void ColorPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const
+void ColorPipeline::updateUniformBuffers(float time, int currentSwapChainImageIndex, const glm::mat4 &proj, const glm::mat4 &view, const glm::mat4 &projView) const
 {
     auto *devFuncs = vulkanRenderer()->devFuncs();
     VkDevice device = vulkanRenderer()->device();
@@ -97,15 +96,22 @@ void ColorPipeline::updateUniformBuffers(float time, const QSize &swapChainImage
                                   "failed to map uniform buffer object memory");
     auto mapGuard = sg::make_scope_guard([&]{ vmaUnmapMemory(allocator, vertUniformBufferAllocation); });
 
-    vertUbo->model = glm::scale(glm::translate(glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F}), glm::vec3{-0.7F, 0.7F, 1.2F}), glm::vec3{0.05F, 0.05F, 0.05F});
+    vertUbo->projViewModel = projView;
 
-    auto aspect = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
-    vertUbo->projView = glm::perspective(glm::radians(45.0F), aspect, 0.1F, 10.0F);
-    vertUbo->projView[1][1] = -vertUbo->projView[1][1];
-
-    glm::mat4 view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F});
-
-    vertUbo->projView *= view;
+    auto model{
+        glm::rotate(
+            glm::scale(
+                glm::translate(
+                    glm::rotate(
+                        glm::mat4{1.0F},
+                        -time * glm::radians(45.0F),
+                        glm::vec3{0.0F, 0.0F, 1.0F}),
+                    glm::vec3{-0.7F, 0.7F, 1.2F}),
+                glm::vec3{0.05F, 0.05F, 0.05F}),
+        time * glm::radians(45.0F),
+        glm::vec3{0.0F, 0.0F, 1.0F}),
+    };
+    vertUbo->projViewModel *= model;
 }
 
 void ColorPipeline::drawCommands(VkCommandBuffer commandBuffer, int currentSwapChainImageIndex) const
@@ -212,7 +218,6 @@ void ColorPipeline::createDescriptorSets(QVector<VkDescriptorSet> &descriptorSet
 
         devFuncs->vkUpdateDescriptorSets(device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
     }
-
 }
 
 PipelineWithLayout ColorPipeline::createGraphicsPipeline() const

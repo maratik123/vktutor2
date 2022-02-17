@@ -18,7 +18,7 @@ public:
     void initResources() override;
     void initSwapChainResources() override;
     [[nodiscard]] DescriptorPoolSizes descriptorPoolSizes(int swapChainImageCount) const override;
-    void updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const override;
+    void updateUniformBuffers(float time, int currentSwapChainImageIndex, const glm::mat4 &proj, const glm::mat4 &view, const glm::mat4 &projView) const override;
     void drawCommands(VkCommandBuffer commandBuffer, int currentSwapChainImageIndex) const override;
     void releaseSwapChainResources() override;
     void releaseResources() override;

@@ -6,6 +6,8 @@ class VulkanRenderer;
 #include <QVulkanInstance>
 #include <QHash>
 
+#include "glm.h"
+
 struct DescriptorPoolSizes
 {
     QHash<VkDescriptorType, uint32_t> poolSize;
@@ -28,7 +30,7 @@ public:
     virtual void initResources() = 0;
     virtual void initSwapChainResources() = 0;
     [[nodiscard]] virtual DescriptorPoolSizes descriptorPoolSizes(int swapChainImageCount) const = 0;
-    virtual void updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const = 0;
+    virtual void updateUniformBuffers(float time, int currentSwapChainImageIndex, const glm::mat4 &proj, const glm::mat4 &view, const glm::mat4 &projView) const = 0;
     virtual void drawCommands(VkCommandBuffer commandBuffer, int currentSwapChainImageIndex) const = 0;
     virtual void releaseSwapChainResources() = 0;
     virtual void releaseResources() = 0;

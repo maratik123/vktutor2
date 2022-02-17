@@ -5,6 +5,13 @@
 #include <QWindow>
 
 namespace {
+enum class PipelineCacheLayoutVersion : int
+{
+    PLAIN = 0,
+    COMPRESS = 1,
+    COMPRESS_B64 = 2
+};
+
 const QString geometry = QStringLiteral("geometry");
 const QString windowState = QStringLiteral("windowState");
 const QString mainWindow = QStringLiteral("mainWindow");
@@ -15,6 +22,7 @@ constexpr int defaultWidth = 800;
 constexpr int defaultHeight = 600;
 constexpr QSize defaultSize{defaultWidth, defaultHeight};
 constexpr QRect defaultGeometry{QPoint{0, 0}, defaultSize};
+constexpr PipelineCacheLayoutVersion pipelineCacheLayoutVersion = PipelineCacheLayoutVersion::COMPRESS_B64;
 
 [[nodiscard]] constexpr Qt::WindowStates filterWindowStates(Qt::WindowStates windowStates)
 {
@@ -43,15 +51,6 @@ void Settings::loadSettings(QWindow &w)
                                                                         .toInt())));
     settings.endGroup();
 }
-
-enum class PipelineCacheLayoutVersion : int
-{
-    PLAIN = 0,
-    COMPRESS = 1,
-    COMPRESS_B64 = 2
-};
-
-constexpr PipelineCacheLayoutVersion pipelineCacheLayoutVersion = PipelineCacheLayoutVersion::COMPRESS_B64;
 
 void Settings::savePipelineCache(const QByteArray &cache)
 {

@@ -12,7 +12,6 @@ public:
     void preInitResources() override;
     void initResources() override;
     void initSwapChainResources() override;
-    [[nodiscard]] QVector<BufferWithAllocation *> allocations() override;
     [[nodiscard]] DescriptorPoolSizes descriptorPoolSizes(int swapChainImageCount) const override;
     void updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const override;
     void drawCommands(VkCommandBuffer commandBuffer, int currentSwapChainImageIndex) const override;

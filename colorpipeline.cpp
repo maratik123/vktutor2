@@ -74,17 +74,6 @@ void ColorPipeline::initSwapChainResources()
     m_graphicsPipelineWithLayout = createGraphicsPipeline();
 }
 
-QVector<BufferWithAllocation *> ColorPipeline::allocations()
-{
-    QVector<BufferWithAllocation *> result{};
-    result.reserve(2 + m_vertUniformBuffers.size());
-    result << &m_vertexBuffer << &m_indexBuffer;
-    for (auto &buffer : m_vertUniformBuffers) {
-        result << &buffer;
-    }
-    return result;
-}
-
 DescriptorPoolSizes ColorPipeline::descriptorPoolSizes(int swapChainImageCount) const
 {
     return {

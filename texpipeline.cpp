@@ -19,14 +19,14 @@ const QString textureName = QStringLiteral(":/textures/viking_room.png");
 
 struct VertBindingObject {
     alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 modelInvTrans;
     alignas(16) glm::mat4 projView;
+    alignas(16) glm::mat3 modelInvTrans;
 };
 
 struct FragBindingObject {
-    alignas(16) glm::vec4 ambientColor;
-    alignas(16) glm::vec4 diffuseLightPos;
-    alignas(16) glm::vec4 diffuseLightColor;
+    alignas(16) glm::vec3 ambientColor;
+    alignas(16) glm::vec3 diffuseLightPos;
+    alignas(16) glm::vec3 diffuseLightColor;
 };
 
 constexpr VkFormat textureFormat = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
@@ -70,20 +70,6 @@ void TexPipeline::initSwapChainResources()
     m_graphicsPipelineWithLayout = createGraphicsPipeline();
 }
 
-QVector<BufferWithAllocation *> TexPipeline::allocations()
-{
-    QVector<BufferWithAllocation *> result{};
-    result.reserve(2 + m_vertUniformBuffers.size() + m_fragUniformBuffers.size());
-    result << &m_vertexBuffer << &m_indexBuffer;
-    for (auto &buffer : m_vertUniformBuffers) {
-        result << &buffer;
-    }
-    for (auto &buffer : m_fragUniformBuffers) {
-        result << &buffer;
-    }
-    return result;
-}
-
 DescriptorPoolSizes TexPipeline::descriptorPoolSizes(int swapChainImageCount) const
 {
     return {
@@ -111,13 +97,13 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
 
         vertUbo->model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
-        vertUbo->modelInvTrans = glm::transpose(glm::inverse(vertUbo->model));
+        vertUbo->modelInvTrans = glm::transpose(glm::inverse(glm::mat3(vertUbo->model)));
 
         auto aspect = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
         vertUbo->projView = glm::perspective(glm::radians(45.0F), aspect, 0.1F, 10.0F);
         vertUbo->projView[1][1] = -vertUbo->projView[1][1];
 
-        glm::mat4 view = glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F});
+        glm::mat4 view{glm::lookAt(glm::vec3{2.0F, 2.0F, 2.0F}, glm::vec3{0.0F, 0.0F, 0.25F}, glm::vec3{0.0F, 0.0F, 1.0F})};
 
         vertUbo->projView *= view;
     }
@@ -130,11 +116,11 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
                                       "failed to map light info memory");
         auto mapGuard = sg::make_scope_guard([&]{ vmaUnmapMemory(allocator, fragUniformBufferAllocation); });
 
-        glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
+        glm::mat3 modelDiffuseLightPos{glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F})};
 
-        fragUbo->ambientColor = {0.01F, 0.01F, 0.01F, 1.0F};
-        fragUbo->diffuseLightPos = modelDiffuseLightPos * glm::vec4{-0.7F, 0.7F, 1.2F, 1.0F};
-        fragUbo->diffuseLightColor = {1.0F, 1.0F, 0.5F, 1.0F};
+        fragUbo->ambientColor = {0.01F, 0.01F, 0.01F};
+        fragUbo->diffuseLightPos = modelDiffuseLightPos * glm::vec3{-0.7F, 0.7F, 1.2F};
+        fragUbo->diffuseLightColor = {1.0F, 1.0F, 0.5F};
     }
 }
 

@@ -126,68 +126,8 @@ void VulkanRenderer::initSwapChainResources()
     qDebug() << "initSwapChainResources";
     updateDepthResources();
     m_descriptorPool = createDescriptorPool();
-    QVector<BufferWithAllocation *> allObjectWithAllocations{};
     for (const auto &pipeline : m_pipelines) {
         pipeline->initSwapChainResources();
-        auto pipeAllocations = pipeline->allocations();
-        allObjectWithAllocations.reserve(allObjectWithAllocations.size() + pipeAllocations.size());
-        allObjectWithAllocations << pipeAllocations;
-    }
-    const auto allocCount = allObjectWithAllocations.size();
-    if (allocCount > 0) {
-        QVector<VmaAllocation> allocations{};
-        allocations.reserve(allocCount);
-        for (const auto &objectWithAllocation : qAsConst(allObjectWithAllocations)) {
-            allocations << objectWithAllocation->allocation;
-        }
-        QVector<VkBool32> allocationsChanged(allocCount);
-
-        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
-
-        try {
-            VmaDefragmentationInfo2 defragInfo{};
-            defragInfo.allocationCount = allocCount;
-            defragInfo.pAllocations = allocations.data();
-            defragInfo.pAllocationsChanged = allocationsChanged.data();
-            defragInfo.maxCpuBytesToMove = VK_WHOLE_SIZE;
-            defragInfo.maxCpuAllocationsToMove = UINT32_MAX;
-            defragInfo.maxGpuBytesToMove = VK_WHOLE_SIZE;
-            defragInfo.maxGpuAllocationsToMove = UINT32_MAX;
-            defragInfo.commandBuffer = commandBuffer;
-
-            VmaDefragmentationContext defragCtx{};
-            VmaDefragmentationStats defragStats{};
-            checkVkResult(vmaDefragmentationBegin(m_allocator, &defragInfo, &defragStats, &defragCtx),
-                          "Unable to begin defragmentation");
-            auto guard = sg::make_scope_guard([&, this]{ checkVkResult(vmaDefragmentationEnd(m_allocator, defragCtx),
-                                                                       "Unable to end defragmentation"); });
-            auto guard2 = sg::make_scope_guard([&]{ commandBuffer = {}; });
-            qDebug() << "defrag: bytes moved: " << defragStats.bytesMoved
-                     << ", bytes freed: " << defragStats.bytesFreed
-                     << ", allocations moved: " << defragStats.allocationsMoved
-                     << ", device memory blocks freed: " << defragStats.deviceMemoryBlocksFreed;
-            endSingleTimeCommands(commandBuffer);
-        } catch (...) {
-            if (commandBuffer != nullptr) {
-                endSingleTimeCommands(commandBuffer);
-            }
-            throw;
-        }
-        for (int i = 0; i < allocCount; ++i) {
-            if (allocationsChanged[i] != VK_FALSE) {
-                auto &objectWithAllocation = *allObjectWithAllocations[i];
-                objectWithAllocation.allocation = allocations.at(i);
-                m_devFuncs->vkDestroyBuffer(m_device, objectWithAllocation.object, nullptr);
-
-                auto bufferInfo = createBufferInfo(objectWithAllocation.size, objectWithAllocation.usage);
-                checkVkResult(m_devFuncs->vkCreateBuffer(m_device, &bufferInfo, nullptr, &objectWithAllocation.object),
-                              "failed to create new buffer");
-                VmaAllocationInfo allocInfo{};
-                vmaGetAllocationInfo(m_allocator, objectWithAllocation.allocation, &allocInfo);
-                checkVkResult(vmaBindBufferMemory(m_allocator, objectWithAllocation.allocation, objectWithAllocation.object),
-                              "failed to bind buffer to allocation");
-            }
-        }
     }
 }
 

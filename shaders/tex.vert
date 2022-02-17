@@ -2,8 +2,8 @@
 
 layout(binding = 0) uniform VertBindingLayout {
     mat4 model;
-    mat4 modelInvTrans;
     mat4 projView;
+    mat3 modelInvTrans;
 } ubo;
 
 layout(location = 0) in vec3 inPosition;
@@ -18,6 +18,6 @@ void main() {
     vec4 mpos = ubo.model * vec4(inPosition, 1.0);
     gl_Position = ubo.projView * mpos;
     fragPosition = mpos.xyz;
-    fragNormal = mat3(ubo.modelInvTrans) * inNormal;
+    fragNormal = ubo.modelInvTrans * inNormal;
     fragTexCoord = inTexCoord;
 }

@@ -2,19 +2,32 @@
 #define VULKANRENDERER_H
 
 #include <QVulkanWindowRenderer>
+#include "vkmemalloc.h"
 
 #include "abstractpipeline.h"
 
-struct BufferWithMemory
+struct BufferWithAllocation
 {
     VkBuffer buffer;
-    VkDeviceMemory memory;
+    VmaAllocation allocation;
+
+    void destroy(VmaAllocator allocator)
+    {
+        vmaDestroyBuffer(allocator, buffer, allocation);
+        *this = {};
+    }
 };
 
-struct ImageWithMemory
+struct ImageWithAllocation
 {
     VkImage image;
-    VkDeviceMemory memory;
+    VmaAllocation allocation;
+
+    void destroy(VmaAllocator allocator)
+    {
+        vmaDestroyImage(allocator, image, allocation);
+        *this = {};
+    }
 };
 
 struct PipelineWithLayout
@@ -42,15 +55,14 @@ public:
     void releaseResources() override;
 
     template<typename T>
-    [[nodiscard]] BufferWithMemory createVertexBuffer(const QVector<T> &vertices) const;
+    [[nodiscard]] BufferWithAllocation createVertexBuffer(const QVector<T> &vertices) const;
     template<typename T>
-    [[nodiscard]] BufferWithMemory createIndexBuffer(const QVector<T> &indices) const;
+    [[nodiscard]] BufferWithAllocation createIndexBuffer(const QVector<T> &indices) const;
     template<typename T, std::size_t Size>
-    [[nodiscard]] BufferWithMemory createVertexBuffer(const std::array<T, Size> &vertices) const;
+    [[nodiscard]] BufferWithAllocation createVertexBuffer(const std::array<T, Size> &vertices) const;
     template<typename T, std::size_t Size>
-    [[nodiscard]] BufferWithMemory createIndexBuffer(const std::array<T, Size> &indices) const;
+    [[nodiscard]] BufferWithAllocation createIndexBuffer(const std::array<T, Size> &indices) const;
     static void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult expectedResult = VkResult::VK_SUCCESS);
-    void destroyBufferWithMemory(BufferWithMemory &buffer) const;
     [[nodiscard]] QVulkanDeviceFunctions *devFuncs() const { return m_devFuncs; }
     [[nodiscard]] VkDevice device() const { return m_device; }
     [[nodiscard]] static VkRect2D createVkRect2D(const QSize &rect);
@@ -61,16 +73,16 @@ public:
     void destroyPipelineWithLayout(PipelineWithLayout &pipelineWithLayout) const;
     [[nodiscard]] VkDescriptorPool descriptorPool() const { return m_descriptorPool; }
     template<typename T>
-    void createUniformBuffers(QVector<BufferWithMemory> &buffers) const { createUniformBuffers(buffers, sizeof(T)); }
-    void destroyUniformBuffers(QVector<BufferWithMemory> &buffers) const;
-    void destroyImageWithMemory(ImageWithMemory &image) const;
-    [[nodiscard]] BufferWithMemory createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex) const;
-    [[nodiscard]] ImageWithMemory createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
-                                              VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const;
+    void createUniformBuffers(QVector<BufferWithAllocation> &buffers) const { createUniformBuffers(buffers, sizeof(T)); }
+    void destroyUniformBuffers(QVector<BufferWithAllocation> &buffers) const;
+    [[nodiscard]] BufferWithAllocation createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const;
+    [[nodiscard]] ImageWithAllocation createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
+                                                  VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage) const;
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) const;
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) const;
     void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) const;
     [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format, uint32_t mipLevels) const;
+    [[nodiscard]] VmaAllocator allocator() const { return m_allocator; }
 
 private:
     std::array<std::unique_ptr<AbstractPipeline>, 2> m_pipelines;
@@ -80,6 +92,7 @@ private:
     VkPhysicalDevice m_physDevice;
     VkDevice m_device;
     QVulkanDeviceFunctions *m_devFuncs;
+    VmaAllocator m_allocator;
 
     VkPipelineCache m_pipelineCache;
 
@@ -91,16 +104,16 @@ private:
     [[nodiscard]] VkShaderModule createShaderModule(const QByteArray &code) const;
 
     void savePipelineCache() const;
-    void createPipelineCache();
+    [[nodiscard]] VkPipelineCache createPipelineCache() const;
 
     [[nodiscard]] VkDescriptorPool createDescriptorPool() const;
 
     template<typename T, typename Iterator>
-    [[nodiscard]] BufferWithMemory createBuffer(Iterator begin, Iterator end, VkBufferUsageFlags usage) const;
+    [[nodiscard]] BufferWithAllocation createBuffer(Iterator begin, Iterator end, VkBufferUsageFlags usage) const;
 
-    void createUniformBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const;
+    void createUniformBuffers(QVector<BufferWithAllocation> &buffers, std::size_t size) const;
 
-    void createDepthResources() const;
+    void updateDepthResources() const;
 
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
 
@@ -108,6 +121,7 @@ private:
     void endSingleTimeCommands(VkCommandBuffer commandBuffer) const;
 
     void updateUniformBuffers() const;
+    [[nodiscard]] VmaAllocator createAllocator() const;
 };
 
 #endif // VULKANRENDERER_H

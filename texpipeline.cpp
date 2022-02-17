@@ -85,14 +85,15 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
 {
     auto *devFuncs = vulkanRenderer()->devFuncs();
     VkDevice device = vulkanRenderer()->device();
+    VmaAllocator allocator = vulkanRenderer()->allocator();
     {
-        VkDeviceMemory vertUniformBufferMemory = m_vertUniformBuffers.at(currentSwapChainImageIndex).memory;
+        VmaAllocation vertUniformBufferAllocation = m_vertUniformBuffers.at(currentSwapChainImageIndex).allocation;
 
         VertBindingObject *vertUbo{};
 
-        VulkanRenderer::checkVkResult(devFuncs->vkMapMemory(device, vertUniformBufferMemory, 0, sizeof(VertBindingObject), {}, reinterpret_cast<void **>(&vertUbo)),
+        VulkanRenderer::checkVkResult(vmaMapMemory(allocator, vertUniformBufferAllocation, reinterpret_cast<void **>(&vertUbo)),
                                       "failed to map uniform buffer object memory");
-        auto mapGuard = sg::make_scope_guard([&]{ devFuncs->vkUnmapMemory(device, vertUniformBufferMemory); });
+        auto mapGuard = sg::make_scope_guard([&]{ vmaUnmapMemory(allocator, vertUniformBufferAllocation); });
 
         vertUbo->model = glm::rotate(glm::mat4{1.0F}, time * glm::radians(6.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
@@ -107,13 +108,13 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
         vertUbo->projView *= view;
     }
     {
-        VkDeviceMemory fragUniformBufferMemory = m_fragUniformBuffers.at(currentSwapChainImageIndex).memory;
+        VmaAllocation fragUniformBufferAllocation = m_fragUniformBuffers.at(currentSwapChainImageIndex).allocation;
 
         FragBindingObject *fragUbo{};
 
-        VulkanRenderer::checkVkResult(devFuncs->vkMapMemory(device, fragUniformBufferMemory, 0, sizeof(FragBindingObject), {}, reinterpret_cast<void **>(&fragUbo)),
+        VulkanRenderer::checkVkResult(vmaMapMemory(allocator, fragUniformBufferAllocation, reinterpret_cast<void **>(&fragUbo)),
                                       "failed to map light info memory");
-        auto mapGuard = sg::make_scope_guard([&]{ devFuncs->vkUnmapMemory(device, fragUniformBufferMemory); });
+        auto mapGuard = sg::make_scope_guard([&]{ vmaUnmapMemory(allocator, fragUniformBufferAllocation); });
 
         glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
@@ -150,16 +151,17 @@ void TexPipeline::releaseResources()
 {
     auto *devFuncs = vulkanRenderer()->devFuncs();
     VkDevice device = vulkanRenderer()->device();
+    VmaAllocator allocator = vulkanRenderer()->allocator();
     devFuncs->vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
     m_descriptorSetLayout = {};
     vulkanRenderer()->destroyShaderModules(m_shaderModules);
-    vulkanRenderer()->destroyBufferWithMemory(m_indexBuffer);
-    vulkanRenderer()->destroyBufferWithMemory(m_vertexBuffer);
+    m_indexBuffer.destroy(allocator);
+    m_vertexBuffer.destroy(allocator);
     devFuncs->vkDestroySampler(device, m_textureSampler, nullptr);
     m_textureSampler = {};
     devFuncs->vkDestroyImageView(device, m_textureImageView, nullptr);
     m_textureImageView = {};
-    vulkanRenderer()->destroyImageWithMemory(m_textureImage);
+    m_textureImage.destroy(allocator);
     m_descriptorSetLayout = {};
 }
 
@@ -196,7 +198,9 @@ PipelineWithLayout TexPipeline::createGraphicsPipeline() const
     inputAssembly.topology = VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    auto swapChainImageSize = vulkanRenderer()->window()->swapChainImageSize();
+    auto *window = vulkanRenderer()->window();
+
+    auto swapChainImageSize = window->swapChainImageSize();
 
     VkViewport viewport{};
     viewport.x = 0.0F;
@@ -231,7 +235,7 @@ PipelineWithLayout TexPipeline::createGraphicsPipeline() const
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_TRUE;
-    multisampling.rasterizationSamples = vulkanRenderer()->window()->sampleCountFlagBits();
+    multisampling.rasterizationSamples = window->sampleCountFlagBits();
     multisampling.minSampleShading = 0.2F;
     multisampling.pSampleMask = nullptr;
     multisampling.alphaToCoverageEnable = VK_FALSE;
@@ -279,8 +283,10 @@ PipelineWithLayout TexPipeline::createGraphicsPipeline() const
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
+    auto *devFuncs = vulkanRenderer()->devFuncs();
+    VkDevice device = vulkanRenderer()->device();
     PipelineWithLayout pipelineWithLayout{};
-    VulkanRenderer::checkVkResult(vulkanRenderer()->devFuncs()->vkCreatePipelineLayout(vulkanRenderer()->device(), &pipelineLayoutInfo, nullptr, &pipelineWithLayout.layout),
+    VulkanRenderer::checkVkResult(devFuncs->vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineWithLayout.layout),
                                   "failed to create pipeline layout");
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -296,11 +302,11 @@ PipelineWithLayout TexPipeline::createGraphicsPipeline() const
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = nullptr;
     pipelineInfo.layout = pipelineWithLayout.layout;
-    pipelineInfo.renderPass = vulkanRenderer()->window()->defaultRenderPass();
+    pipelineInfo.renderPass = window->defaultRenderPass();
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
-    VulkanRenderer::checkVkResult(vulkanRenderer()->devFuncs()->vkCreateGraphicsPipelines(vulkanRenderer()->device(), vulkanRenderer()->pipelineCache(), 1, &pipelineInfo, nullptr, &pipelineWithLayout.pipeline),
+    VulkanRenderer::checkVkResult(devFuncs->vkCreateGraphicsPipelines(device, vulkanRenderer()->pipelineCache(), 1, &pipelineInfo, nullptr, &pipelineWithLayout.pipeline),
                                   "failed to create graphics pipeline");
     return pipelineWithLayout;
 }
@@ -436,12 +442,13 @@ void TexPipeline::loadModel()
 void TexPipeline::createTextureImage()
 {
     qDebug() << "Create texture image";
-    BufferWithMemory stagingBuffer{};
+    BufferWithAllocation stagingBuffer{};
     int texWidth{};
     int texHeight{};
     auto *window = vulkanRenderer()->window();
     auto *devFuncs = vulkanRenderer()->devFuncs();
     VkDevice device = vulkanRenderer()->device();
+    VmaAllocator allocator = vulkanRenderer()->allocator();
     try {
         QImage texture = QImage{textureName}
                 .convertToFormat(QImage::Format::Format_RGBA8888);
@@ -454,25 +461,25 @@ void TexPipeline::createTextureImage()
         texHeight = texture.height();
         m_mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
-        stagingBuffer = vulkanRenderer()->createBuffer(imageSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, window->hostVisibleMemoryIndex());
+        stagingBuffer = vulkanRenderer()->createBuffer(imageSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY);
 
         uint8_t *data{};
-        VulkanRenderer::checkVkResult(devFuncs->vkMapMemory(device, stagingBuffer.memory, 0, imageSize, {}, reinterpret_cast<void **>(&data)),
+        VulkanRenderer::checkVkResult(vmaMapMemory(allocator, stagingBuffer.allocation, reinterpret_cast<void **>(&data)),
                                       "failed to map texture staging buffer memory");
-        auto mapGuard = sg::make_scope_guard([&]{ devFuncs->vkUnmapMemory(device, stagingBuffer.memory); });
+        auto mapGuard = sg::make_scope_guard([&]{ vmaUnmapMemory(allocator, stagingBuffer.allocation); });
         std::copy_n(texture.constBits(), imageSize, data);
     } catch (...) {
-        vulkanRenderer()->destroyBufferWithMemory(stagingBuffer);
+        stagingBuffer.destroy(allocator);
         throw;
     }
 
-    auto bufferGuard = sg::make_scope_guard([&, this]{ vulkanRenderer()->destroyBufferWithMemory(stagingBuffer); });
+    auto bufferGuard = sg::make_scope_guard([&, this]{ stagingBuffer.destroy(allocator); });
     VkImageUsageFlags usage = static_cast<VkImageUsageFlags>(VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
             | VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT
             | VkImageUsageFlagBits::VK_IMAGE_USAGE_SAMPLED_BIT;
 
     m_textureImage = vulkanRenderer()->createImage(texWidth, texHeight, m_mipLevels, VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
-                                                   textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL, usage, window->deviceLocalMemoryIndex());
+                                                   textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL, usage, VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
     vulkanRenderer()->transitionImageLayout(m_textureImage.image, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_mipLevels);
     vulkanRenderer()->copyBufferToImage(stagingBuffer.buffer, m_textureImage.image, texWidth, texHeight);
     vulkanRenderer()->generateMipmaps(m_textureImage.image, textureFormat, texWidth, texHeight, m_mipLevels);

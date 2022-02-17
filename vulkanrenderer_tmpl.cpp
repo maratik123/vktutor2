@@ -8,7 +8,7 @@
 #include "externals/scope_guard/scope_guard.hpp"
 
 template<typename T>
-BufferWithMemory VulkanRenderer::createVertexBuffer(const QVector<T> &vertices) const
+BufferWithAllocation VulkanRenderer::createVertexBuffer(const QVector<T> &vertices) const
 {
     qDebug() << "Create vertex buffer";
 
@@ -16,7 +16,7 @@ BufferWithMemory VulkanRenderer::createVertexBuffer(const QVector<T> &vertices) 
 }
 
 template<typename T>
-BufferWithMemory VulkanRenderer::createIndexBuffer(const QVector<T> &indices) const
+BufferWithAllocation VulkanRenderer::createIndexBuffer(const QVector<T> &indices) const
 {
     qDebug() << "Create index buffer";
 
@@ -24,7 +24,7 @@ BufferWithMemory VulkanRenderer::createIndexBuffer(const QVector<T> &indices) co
 }
 
 template<typename T, std::size_t Size>
-BufferWithMemory VulkanRenderer::createVertexBuffer(const std::array<T, Size> &vertices) const
+BufferWithAllocation VulkanRenderer::createVertexBuffer(const std::array<T, Size> &vertices) const
 {
     qDebug() << "Create vertex buffer";
 
@@ -32,7 +32,7 @@ BufferWithMemory VulkanRenderer::createVertexBuffer(const std::array<T, Size> &v
 }
 
 template<typename T, std::size_t Size>
-BufferWithMemory VulkanRenderer::createIndexBuffer(const std::array<T, Size> &indices) const
+BufferWithAllocation VulkanRenderer::createIndexBuffer(const std::array<T, Size> &indices) const
 {
     qDebug() << "Create index buffer";
 
@@ -40,32 +40,36 @@ BufferWithMemory VulkanRenderer::createIndexBuffer(const std::array<T, Size> &in
 }
 
 template<typename T, typename Iterator>
-BufferWithMemory VulkanRenderer::createBuffer(Iterator begin, Iterator end, VkBufferUsageFlags usage) const
+BufferWithAllocation VulkanRenderer::createBuffer(Iterator begin, Iterator end, VkBufferUsageFlags usage) const
 {
     qDebug() << "Create buffer";
 
     VkDeviceSize bufferSize = std::distance(begin, end) * sizeof(T);
 
-    auto stagingBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, m_window->hostVisibleMemoryIndex());
-    auto bufferGuard = sg::make_scope_guard([&, this]{ destroyBufferWithMemory(stagingBuffer); });
+    auto stagingBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY);
+    auto bufferGuard = sg::make_scope_guard([&, this]{ stagingBuffer.destroy(m_allocator); });
 
     T *data{};
-    checkVkResult(m_devFuncs->vkMapMemory(m_device, stagingBuffer.memory, 0, bufferSize, {}, reinterpret_cast<void **>(&data)),
+    checkVkResult(vmaMapMemory(m_allocator, stagingBuffer.allocation, reinterpret_cast<void **>(&data)),
                   "failed to map memory to staging buffer");
     {
-        auto mapGuard = sg::make_scope_guard([&, this]{ m_devFuncs->vkUnmapMemory(m_device, stagingBuffer.memory); });
+        auto mapGuard = sg::make_scope_guard([&, this]{ vmaUnmapMemory(m_allocator, stagingBuffer.allocation); });
         std::copy(begin, end, data);
     }
 
-    BufferWithMemory deviceBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
-                                                 m_window->deviceLocalMemoryIndex());
+    auto deviceBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
+                                                 VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
+    try {
+        copyBuffer(stagingBuffer.buffer, deviceBuffer.buffer, bufferSize);
 
-    copyBuffer(stagingBuffer.buffer, deviceBuffer.buffer, bufferSize);
-
-    return deviceBuffer;
+        return deviceBuffer;
+    } catch(...) {
+        vmaUnmapMemory(m_allocator, deviceBuffer.allocation);
+        throw;
+    }
 }
 
-template BufferWithMemory VulkanRenderer::createVertexBuffer(const QVector<TexVertex> &vertices) const;
-template BufferWithMemory VulkanRenderer::createIndexBuffer(const QVector<uint32_t> &indices) const;
-template BufferWithMemory VulkanRenderer::createVertexBuffer(const std::array<ColorVertex, 8> &vertices) const;
-template BufferWithMemory VulkanRenderer::createIndexBuffer(const std::array<uint16_t, 36> &indices) const;
+template BufferWithAllocation VulkanRenderer::createVertexBuffer(const QVector<TexVertex> &vertices) const;
+template BufferWithAllocation VulkanRenderer::createIndexBuffer(const QVector<uint32_t> &indices) const;
+template BufferWithAllocation VulkanRenderer::createVertexBuffer(const std::array<ColorVertex, 8> &vertices) const;
+template BufferWithAllocation VulkanRenderer::createIndexBuffer(const std::array<uint16_t, 36> &indices) const;

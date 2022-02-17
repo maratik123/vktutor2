@@ -1,7 +1,6 @@
 #include "vulkanrenderer.h"
 
 #include "utils.h"
-#include "glm.h"
 #include "settings.h"
 #include "texpipeline.h"
 #include "colorpipeline.h"
@@ -9,15 +8,12 @@
 #include "externals/scope_guard/scope_guard.hpp"
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <string>
 
-#include <QColorSpace>
 #include <QDebug>
-#include <QImage>
 #include <QVulkanDeviceFunctions>
-#include <QVulkanFunctions>
+#include <QLibrary>
 
 namespace {
 constexpr VkClearColorValue clearColor{{0.0F, 0.0F, 0.0F, 1.0F}};
@@ -75,6 +71,7 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
     , m_physDevice{}
     , m_device{}
     , m_devFuncs{}
+    , m_allocator{}
     , m_pipelineCache{}
     , m_texShaderModules{}
     , m_colorShaderModules{}
@@ -87,11 +84,11 @@ VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
 void VulkanRenderer::preInitResources()
 {
     qDebug() << "preInitResources";
+    qDebug() << "Vulkan version: " << m_vkInst->apiVersion();
     m_window->setPreferredColorFormats({
             VkFormat::VK_FORMAT_B8G8R8A8_SRGB,
             VkFormat::VK_FORMAT_B8G8R8A8_UNORM
     });
-    m_window->setPhysicalDeviceIndex(0);
     {
         auto supportedSampleCounts = m_window->supportedSampleCounts();
         m_window->setSampleCount(supportedSampleCounts.constLast());
@@ -107,7 +104,8 @@ void VulkanRenderer::initResources()
     m_physDevice = m_window->physicalDevice();
     m_device = m_window->device();
     m_devFuncs = m_vkInst->deviceFunctions(m_device);
-    createPipelineCache();
+    m_allocator = createAllocator();
+    m_pipelineCache = createPipelineCache();
     for (const auto &pipeline : m_pipelines) {
         pipeline->initResources();
     }
@@ -116,7 +114,7 @@ void VulkanRenderer::initResources()
 void VulkanRenderer::initSwapChainResources()
 {
     qDebug() << "initSwapChainResources";
-    createDepthResources();
+    updateDepthResources();
     m_descriptorPool = createDescriptorPool();
     for (const auto &pipeline : m_pipelines) {
         pipeline->initSwapChainResources();
@@ -144,6 +142,8 @@ void VulkanRenderer::releaseResources()
     savePipelineCache();
     m_devFuncs->vkDestroyPipelineCache(m_device, m_pipelineCache, nullptr);
     m_pipelineCache = {};
+    vmaDestroyAllocator(m_allocator);
+    m_allocator = {};
     m_devFuncs = {};
     m_device = {};
     m_physDevice = {};
@@ -184,7 +184,7 @@ VkShaderModule VulkanRenderer::createShaderModule(const QByteArray &code) const
     return shaderModule;
 }
 
-void VulkanRenderer::createUniformBuffers(QVector<BufferWithMemory> &buffers, std::size_t size) const
+void VulkanRenderer::createUniformBuffers(QVector<BufferWithAllocation> &buffers, std::size_t size) const
 {
     qDebug() << "Create uniform buffers";
 
@@ -192,55 +192,14 @@ void VulkanRenderer::createUniformBuffers(QVector<BufferWithMemory> &buffers, st
     buffers.clear();
     buffers.reserve(swapChainImageCount);
     for (int i = 0; i < swapChainImageCount; ++i) {
-        buffers << createBuffer(size, VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, m_window->hostVisibleMemoryIndex());
-    }
-}
-
-BufferWithMemory VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, uint32_t memoryTypeIndex) const
-{
-    qDebug() << "Create buffer";
-
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
-    VkBuffer buffer{};
-    checkVkResult(m_devFuncs->vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer),
-                  "failed to create buffer");
-    try {
-        VkMemoryRequirements memRequirements{};
-        m_devFuncs->vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
-
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memRequirements.size;
-        allocInfo.memoryTypeIndex = memoryTypeIndex;
-        VkDeviceMemory memory{};
-        checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &memory),
-                      "failed to allocate buffer memory");
-        try {
-            checkVkResult(m_devFuncs->vkBindBufferMemory(m_device, buffer, memory, 0),
-                          "failed to bind vertex buffer to memory");
-            return {buffer, memory};
-        } catch(...) {
-            auto guard = sg::make_scope_guard([&, this]{
-                auto guard2 = sg::make_scope_guard([&]{ buffer = {}; });
-                m_devFuncs->vkFreeMemory(m_device, memory, nullptr);
-            });
-            m_devFuncs->vkDestroyBuffer(m_device, buffer, nullptr);
-            throw;
-        }
-    } catch(...) {
-        if (buffer == nullptr) {
-            m_devFuncs->vkDestroyBuffer(m_device, buffer, nullptr);
-        }
-        throw;
+        buffers << createBuffer(size, VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
     }
 }
 
 void VulkanRenderer::startNextFrame()
 {
+    auto currentSwapChainImageIndex = m_window->currentSwapChainImageIndex();
+    vmaSetCurrentFrameIndex(m_allocator, currentSwapChainImageIndex);
     updateUniformBuffers();
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -252,7 +211,6 @@ void VulkanRenderer::startNextFrame()
     renderPassInfo.pClearValues = clearValues.data();
     VkCommandBuffer commandBuffer = m_window->currentCommandBuffer();
     m_devFuncs->vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
-    auto currentSwapChainImageIndex = m_window->currentSwapChainImageIndex();
     for (const auto &pipeline : m_pipelines) {
         pipeline->drawCommands(commandBuffer, currentSwapChainImageIndex);
     }
@@ -414,8 +372,28 @@ void VulkanRenderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_
                                      1, &barrier);
 }
 
-ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
-                                            VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, uint32_t memoryTypeIndex) const
+
+BufferWithAllocation VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const
+{
+    qDebug() << "Create buffer";
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocationInfo{};
+    allocationInfo.usage = memoryUsage;
+
+    BufferWithAllocation result{};
+    checkVkResult(vmaCreateBuffer(m_allocator, &bufferInfo, &allocationInfo, &result.buffer, &result.allocation, nullptr),
+                  "failed to create buffer with allocation");
+    return result;
+}
+
+ImageWithAllocation VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
+                                                VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage) const
 {
     qDebug() << "Create image";
 
@@ -434,38 +412,14 @@ ImageWithMemory VulkanRenderer::createImage(uint32_t width, uint32_t height, uin
     imageInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.samples = numSamples;
     imageInfo.flags = {};
-    VkImage image{};
-    checkVkResult(m_devFuncs->vkCreateImage(m_device, &imageInfo, nullptr, &image),
-                  "failed to create image");
-    try {
-        VkMemoryRequirements memRequirements{};
-        m_devFuncs->vkGetImageMemoryRequirements(m_device, image, &memRequirements);
 
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memRequirements.size;
-        allocInfo.memoryTypeIndex = memoryTypeIndex;
-        VkDeviceMemory memory{};
-        checkVkResult(m_devFuncs->vkAllocateMemory(m_device, &allocInfo, nullptr, &memory),
-                      "failed to allocate image memory");
-        try {
-            checkVkResult(m_devFuncs->vkBindImageMemory(m_device, image, memory, 0),
-                          "failed to bind image memory");
-            return {image, memory};
-        } catch(...) {
-            auto guard = sg::make_scope_guard([&, this] {
-                auto guard2 = sg::make_scope_guard([&]{ image = {}; });
-                m_devFuncs->vkFreeMemory(m_device, memory, nullptr);
-            });
-            m_devFuncs->vkDestroyImage(m_device, image, nullptr);
-            throw;
-        }
-    } catch(...) {
-        if (image == nullptr) {
-            m_devFuncs->vkDestroyImage(m_device, image, nullptr);
-        }
-        throw;
-    }
+    VmaAllocationCreateInfo allocationInfo{};
+    allocationInfo.usage = memoryUsage;
+
+    ImageWithAllocation result{};
+    checkVkResult(vmaCreateImage(m_allocator, &imageInfo, &allocationInfo, &result.image, &result.allocation, nullptr),
+                  "failed to create image");
+    return result;
 }
 
 void VulkanRenderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const
@@ -643,14 +597,14 @@ VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format, uint
     return imageView;
 }
 
-void VulkanRenderer::createDepthResources() const
+void VulkanRenderer::updateDepthResources() const
 {
-    qDebug() << "Create depth resources";
+    qDebug() << "Update depth resources";
     transitionImageLayout(m_window->depthStencilImage(), m_window->depthStencilFormat(),
                           VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
 }
 
-void VulkanRenderer::createPipelineCache()
+VkPipelineCache VulkanRenderer::createPipelineCache() const
 {
     qDebug() << "Create pipeline cache";
     auto pipelineCacheData = Settings::loadPipelineCache();
@@ -658,8 +612,10 @@ void VulkanRenderer::createPipelineCache()
     pipelineCacheInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     pipelineCacheInfo.initialDataSize = pipelineCacheData.size();
     pipelineCacheInfo.pInitialData = pipelineCacheData.constData();
-    checkVkResult(m_devFuncs->vkCreatePipelineCache(m_device, &pipelineCacheInfo, nullptr, &m_pipelineCache),
+    VkPipelineCache pipelineCache{};
+    checkVkResult(m_devFuncs->vkCreatePipelineCache(m_device, &pipelineCacheInfo, nullptr, &pipelineCache),
                   "failed to create pipeline cache");
+    return pipelineCache;
 }
 
 void VulkanRenderer::savePipelineCache() const
@@ -675,27 +631,11 @@ void VulkanRenderer::savePipelineCache() const
     Settings::savePipelineCache(pipelineCacheData);
 }
 
-void VulkanRenderer::destroyBufferWithMemory(BufferWithMemory &buffer) const
-{
-    qDebug() << "Destroy buffer with memory";
-    m_devFuncs->vkDestroyBuffer(m_device, buffer.buffer, nullptr);
-    m_devFuncs->vkFreeMemory(m_device, buffer.memory, nullptr);
-    buffer = {};
-}
-
-void VulkanRenderer::destroyImageWithMemory(ImageWithMemory &image) const
-{
-    qDebug() << "Destroy image with memory";
-    m_devFuncs->vkDestroyImage(m_device, image.image, nullptr);
-    m_devFuncs->vkFreeMemory(m_device, image.memory, nullptr);
-    image = {};
-}
-
-void VulkanRenderer::destroyUniformBuffers(QVector<BufferWithMemory> &buffers) const
+void VulkanRenderer::destroyUniformBuffers(QVector<BufferWithAllocation> &buffers) const
 {
     qDebug() << "Destroy buffers";
     for (auto &buffer : buffers) {
-        destroyBufferWithMemory(buffer);
+        buffer.destroy(m_allocator);
     }
     buffers.clear();
 }
@@ -733,4 +673,50 @@ VkRect2D VulkanRenderer::createVkRect2D(const QSize &rect)
             static_cast<uint32_t>(rect.height())
         }
     };
+}
+
+VmaAllocator VulkanRenderer::createAllocator() const
+{
+    VmaVulkanFunctions vulkanFunctions{};
+    //No valid method to get this in Qt5
+    vulkanFunctions.vkGetInstanceProcAddr = {};
+
+    vulkanFunctions.vkGetDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(m_vkInst->getInstanceProcAddr("vkGetDeviceProcAddr"));
+    vulkanFunctions.vkGetPhysicalDeviceProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(m_vkInst->getInstanceProcAddr("vkGetPhysicalDeviceProperties"));
+    vulkanFunctions.vkGetPhysicalDeviceMemoryProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties2>(m_vkInst->getInstanceProcAddr("vkGetPhysicalDeviceMemoryProperties2"));
+    vulkanFunctions.vkGetPhysicalDeviceMemoryProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(m_vkInst->getInstanceProcAddr("vkGetPhysicalDeviceMemoryProperties"));
+
+    vulkanFunctions.vkAllocateMemory = reinterpret_cast<PFN_vkAllocateMemory>(m_funcs->vkGetDeviceProcAddr(m_device, "vkAllocateMemory"));
+    vulkanFunctions.vkFreeMemory = reinterpret_cast<PFN_vkFreeMemory>(m_funcs->vkGetDeviceProcAddr(m_device, "vkFreeMemory"));
+    vulkanFunctions.vkMapMemory = reinterpret_cast<PFN_vkMapMemory>(m_funcs->vkGetDeviceProcAddr(m_device, "vkMapMemory"));
+    vulkanFunctions.vkUnmapMemory = reinterpret_cast<PFN_vkUnmapMemory>(m_funcs->vkGetDeviceProcAddr(m_device, "vkUnmapMemory"));
+    vulkanFunctions.vkFlushMappedMemoryRanges = reinterpret_cast<PFN_vkFlushMappedMemoryRanges>(m_funcs->vkGetDeviceProcAddr(m_device, "vkFlushMappedMemoryRanges"));
+    vulkanFunctions.vkInvalidateMappedMemoryRanges = reinterpret_cast<PFN_vkInvalidateMappedMemoryRanges>(m_funcs->vkGetDeviceProcAddr(m_device, "vkInvalidateMappedMemoryRanges"));
+    vulkanFunctions.vkBindBufferMemory = reinterpret_cast<PFN_vkBindBufferMemory>(m_funcs->vkGetDeviceProcAddr(m_device, "vkBindBufferMemory"));
+    vulkanFunctions.vkBindImageMemory = reinterpret_cast<PFN_vkBindImageMemory>(m_funcs->vkGetDeviceProcAddr(m_device, "vkBindImageMemory"));
+    vulkanFunctions.vkGetBufferMemoryRequirements = reinterpret_cast<PFN_vkGetBufferMemoryRequirements>(m_funcs->vkGetDeviceProcAddr(m_device, "vkGetBufferMemoryRequirements"));
+    vulkanFunctions.vkGetImageMemoryRequirements = reinterpret_cast<PFN_vkGetImageMemoryRequirements>(m_funcs->vkGetDeviceProcAddr(m_device, "vkGetImageMemoryRequirements"));
+    vulkanFunctions.vkCreateBuffer = reinterpret_cast<PFN_vkCreateBuffer>(m_funcs->vkGetDeviceProcAddr(m_device, "vkCreateBuffer"));
+    vulkanFunctions.vkDestroyBuffer = reinterpret_cast<PFN_vkDestroyBuffer>(m_funcs->vkGetDeviceProcAddr(m_device, "vkDestroyBuffer"));
+    vulkanFunctions.vkCreateImage = reinterpret_cast<PFN_vkCreateImage>(m_funcs->vkGetDeviceProcAddr(m_device, "vkCreateImage"));
+    vulkanFunctions.vkDestroyImage = reinterpret_cast<PFN_vkDestroyImage>(m_funcs->vkGetDeviceProcAddr(m_device, "vkDestroyImage"));
+    vulkanFunctions.vkCmdCopyBuffer = reinterpret_cast<PFN_vkCmdCopyBuffer>(m_funcs->vkGetDeviceProcAddr(m_device, "vkCmdCopyBuffer"));
+    vulkanFunctions.vkGetBufferMemoryRequirements2KHR = reinterpret_cast<PFN_vkGetBufferMemoryRequirements2>(m_funcs->vkGetDeviceProcAddr(m_device, "vkGetBufferMemoryRequirements2"));
+    vulkanFunctions.vkGetImageMemoryRequirements2KHR = reinterpret_cast<PFN_vkGetImageMemoryRequirements2>(m_funcs->vkGetDeviceProcAddr(m_device, "vkGetImageMemoryRequirements2"));
+    vulkanFunctions.vkBindBufferMemory2KHR = reinterpret_cast<PFN_vkBindBufferMemory2>(m_funcs->vkGetDeviceProcAddr(m_device, "vkBindBufferMemory2"));
+    vulkanFunctions.vkBindImageMemory2KHR = reinterpret_cast<PFN_vkBindImageMemory2>(m_funcs->vkGetDeviceProcAddr(m_device, "vkBindImageMemory2"));
+
+    VmaAllocatorCreateInfo allocatorInfo{};
+    auto vulkanVersion = m_vkInst->apiVersion();
+    // NOLINTNEXTLINE(hicpp-signed-bitwise)
+    allocatorInfo.vulkanApiVersion = VK_MAKE_API_VERSION(0, vulkanVersion.majorVersion(), vulkanVersion.minorVersion(), 0U);
+    allocatorInfo.physicalDevice = m_physDevice;
+    allocatorInfo.device = m_device;
+    allocatorInfo.instance = m_vkInst->vkInstance();
+    allocatorInfo.pVulkanFunctions = &vulkanFunctions;
+
+    VmaAllocator allocator{};
+    checkVkResult(vmaCreateAllocator(&allocatorInfo, &allocator),
+                  "Can not create allocator");
+    return allocator;
 }

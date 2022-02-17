@@ -81,13 +81,14 @@ void ColorPipeline::updateUniformBuffers(float time, const QSize &swapChainImage
 {
     auto *devFuncs = vulkanRenderer()->devFuncs();
     VkDevice device = vulkanRenderer()->device();
-    VkDeviceMemory vertUniformBufferMemory = m_vertUniformBuffers.at(currentSwapChainImageIndex).memory;
+    VmaAllocator allocator = vulkanRenderer()->allocator();
+    VmaAllocation vertUniformBufferAllocation = m_vertUniformBuffers.at(currentSwapChainImageIndex).allocation;
 
     VertBindingObject *vertUbo{};
 
-    VulkanRenderer::checkVkResult(devFuncs->vkMapMemory(device, vertUniformBufferMemory, 0, sizeof(VertBindingObject), {}, reinterpret_cast<void **>(&vertUbo)),
+    VulkanRenderer::checkVkResult(vmaMapMemory(allocator, vertUniformBufferAllocation, reinterpret_cast<void **>(&vertUbo)),
                                   "failed to map uniform buffer object memory");
-    auto mapGuard = sg::make_scope_guard([&]{ devFuncs->vkUnmapMemory(device, vertUniformBufferMemory); });
+    auto mapGuard = sg::make_scope_guard([&]{ vmaUnmapMemory(allocator, vertUniformBufferAllocation); });
 
     vertUbo->model = glm::scale(glm::translate(glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F}), glm::vec3{-0.7F, 0.7F, 1.0F}), glm::vec3{0.05F, 0.05F, 0.05F});
 
@@ -127,10 +128,11 @@ void ColorPipeline::releaseResources()
 {
     auto *devFuncs = vulkanRenderer()->devFuncs();
     VkDevice device = vulkanRenderer()->device();
+    VmaAllocator allocator = vulkanRenderer()->allocator();
     devFuncs->vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
     m_descriptorSetLayout = {};
-    vulkanRenderer()->destroyBufferWithMemory(m_indexBuffer);
-    vulkanRenderer()->destroyBufferWithMemory(m_vertexBuffer);
+    m_indexBuffer.destroy(allocator);
+    m_vertexBuffer.destroy(allocator);
     vulkanRenderer()->destroyShaderModules(m_shaderModules);
 }
 
@@ -239,7 +241,8 @@ PipelineWithLayout ColorPipeline::createGraphicsPipeline() const
     inputAssembly.topology = VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    auto swapChainImageSize = vulkanRenderer()->window()->swapChainImageSize();
+    auto *window = vulkanRenderer()->window();
+    auto swapChainImageSize = window->swapChainImageSize();
 
     VkViewport viewport{};
     viewport.x = 0.0F;
@@ -274,7 +277,7 @@ PipelineWithLayout ColorPipeline::createGraphicsPipeline() const
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_TRUE;
-    multisampling.rasterizationSamples = vulkanRenderer()->window()->sampleCountFlagBits();
+    multisampling.rasterizationSamples = window->sampleCountFlagBits();
     multisampling.minSampleShading = 0.2F;
     multisampling.pSampleMask = nullptr;
     multisampling.alphaToCoverageEnable = VK_FALSE;
@@ -322,8 +325,10 @@ PipelineWithLayout ColorPipeline::createGraphicsPipeline() const
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
+    auto *devFuncs = vulkanRenderer()->devFuncs();
+    VkDevice device = vulkanRenderer()->device();
     PipelineWithLayout pipelineWithLayout{};
-    VulkanRenderer::checkVkResult(vulkanRenderer()->devFuncs()->vkCreatePipelineLayout(vulkanRenderer()->device(), &pipelineLayoutInfo, nullptr, &pipelineWithLayout.layout),
+    VulkanRenderer::checkVkResult(devFuncs->vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineWithLayout.layout),
                                   "failed to create pipeline layout");
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -339,11 +344,11 @@ PipelineWithLayout ColorPipeline::createGraphicsPipeline() const
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = nullptr;
     pipelineInfo.layout = pipelineWithLayout.layout;
-    pipelineInfo.renderPass = vulkanRenderer()->window()->defaultRenderPass();
+    pipelineInfo.renderPass = window->defaultRenderPass();
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
-    VulkanRenderer::checkVkResult(vulkanRenderer()->devFuncs()->vkCreateGraphicsPipelines(vulkanRenderer()->device(), vulkanRenderer()->pipelineCache(), 1, &pipelineInfo, nullptr, &pipelineWithLayout.pipeline),
+    VulkanRenderer::checkVkResult(devFuncs->vkCreateGraphicsPipelines(device, vulkanRenderer()->pipelineCache(), 1, &pipelineInfo, nullptr, &pipelineWithLayout.pipeline),
                                   "failed to create graphics pipeline");
     return pipelineWithLayout;
 }

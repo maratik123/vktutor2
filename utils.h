@@ -3,7 +3,7 @@
 
 #include <QByteArrayList>
 
-extern const QByteArrayList validationLayers;
+extern const QByteArrayList vulkanLayers;
 
 constexpr bool enableValidationLayers =
 #ifdef NDEBUG

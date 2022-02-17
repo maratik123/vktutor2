@@ -19,13 +19,13 @@ public:
     void releaseResources() override;
 
 private:
-    BufferWithMemory m_vertexBuffer;
-    BufferWithMemory m_indexBuffer;
+    BufferWithAllocation m_vertexBuffer;
+    BufferWithAllocation m_indexBuffer;
     PipelineWithLayout m_graphicsPipelineWithLayout;
     QVector<VkDescriptorSet> m_descriptorSets;
     ShaderModules m_shaderModules;
     VkDescriptorSetLayout m_descriptorSetLayout;
-    QVector<BufferWithMemory> m_vertUniformBuffers;
+    QVector<BufferWithAllocation> m_vertUniformBuffers;
 
     [[nodiscard]] PipelineWithLayout createGraphicsPipeline() const;
     [[nodiscard]] VkDescriptorSetLayout createDescriptorSetLayout() const;

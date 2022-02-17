@@ -22,10 +22,10 @@ int main(int argc, char *argv[])
     QGuiApplication a{argc, argv};
 
     QVulkanInstance inst{};
-    inst.setApiVersion(QVersionNumber{1, 0, 0});
-    if constexpr (enableValidationLayers) {
-        inst.setLayers(validationLayers);
-    }
+    inst.setApiVersion(QVersionNumber{1, 2, 0});
+
+    inst.setLayers(vulkanLayers);
+
     if (!inst.create()) {
         qDebug() << "Vulkan is not available: " << inst.errorCode();
         return 1;

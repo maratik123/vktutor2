@@ -20,7 +20,7 @@ function(add_shader TARGET SHADER)
     file(MAKE_DIRECTORY ${current-output-dir})
     add_custom_command(
         OUTPUT ${current-output-path}
-        COMMAND ${Vulkan_GLSLC_EXECUTABLE} -O -o ${current-output-path} ${current-shader-path}
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} --target-env=vulkan1.2 -O -o ${current-output-path} ${current-shader-path}
         DEPENDS ${current-shader-path}
         IMPLICIT_DEPENDS CXX ${current-shader-path}
         VERBATIM
@@ -172,7 +172,7 @@ set(PROJECT_SOURCES
     abstractpipeline.cpp abstractpipeline.h
     texpipeline.cpp texpipeline.h
     colorpipeline.cpp colorpipeline.h
-    vkmemalloc.cpp
+    vkmemalloc.cpp vkmemalloc.h
 )
 
 add_resources(GENERATED_SOURCES "${resources}")

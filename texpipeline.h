@@ -26,15 +26,15 @@ public:
 private:
     QVector<TexVertex> m_vertices;
     QVector<uint32_t> m_indices;
-    BufferWithMemory m_vertexBuffer;
-    BufferWithMemory m_indexBuffer;
+    BufferWithAllocation m_vertexBuffer;
+    BufferWithAllocation m_indexBuffer;
     PipelineWithLayout m_graphicsPipelineWithLayout;
     QVector<VkDescriptorSet> m_descriptorSets;
     ShaderModules m_shaderModules;
     VkDescriptorSetLayout m_descriptorSetLayout;
-    QVector<BufferWithMemory> m_vertUniformBuffers;
-    QVector<BufferWithMemory> m_fragUniformBuffers;
-    ImageWithMemory m_textureImage;
+    QVector<BufferWithAllocation> m_vertUniformBuffers;
+    QVector<BufferWithAllocation> m_fragUniformBuffers;
+    ImageWithAllocation m_textureImage;
     VkImageView m_textureImageView;
     VkSampler m_textureSampler;
     uint32_t m_mipLevels;

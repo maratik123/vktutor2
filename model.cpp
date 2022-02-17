@@ -65,7 +65,7 @@ bool MaterialDirReader::operator()(const std::string &matId,
                                    std::string *warn,
                                    std::string *err)
 {
-    QString fileName{std::move(QString::fromStdString(matId))};
+    QString fileName{QString::fromStdString(matId)};
     QFile file{m_dir->filePath(fileName)};
     qDebug() << "Load material: " << file;
     if (!file.open(QFile::OpenModeFlag::ReadOnly)) {

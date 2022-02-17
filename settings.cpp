@@ -47,18 +47,22 @@ void Settings::loadSettings(QWindow &w)
 enum class PipelineCacheLayoutVersion : int
 {
     PLAIN = 0,
-    COMPRESS = 1
+    COMPRESS = 1,
+    COMPRESS_B64 = 2
 };
 
-constexpr PipelineCacheLayoutVersion pipelineCacheLayoutVersion = PipelineCacheLayoutVersion::COMPRESS;
+constexpr PipelineCacheLayoutVersion pipelineCacheLayoutVersion = PipelineCacheLayoutVersion::COMPRESS_B64;
 
 void Settings::savePipelineCache(const QByteArray &cache)
 {
     QSettings settings{};
     settings.beginGroup(graphics);
-    QByteArray convertedCache = cache;
-    if (pipelineCacheLayoutVersion == PipelineCacheLayoutVersion::COMPRESS) {
+    QByteArray convertedCache{cache};
+    if (pipelineCacheLayoutVersion == PipelineCacheLayoutVersion::COMPRESS || pipelineCacheLayoutVersion == PipelineCacheLayoutVersion::COMPRESS_B64) {
         convertedCache = qCompress(convertedCache, 9);
+        if (pipelineCacheLayoutVersion == PipelineCacheLayoutVersion::COMPRESS_B64) {
+            convertedCache = convertedCache.toBase64();
+        }
     }
     settings.setValue(pipelineCache, convertedCache);
     settings.setValue(pipelineCacheLayoutVersionName, static_cast<int>(pipelineCacheLayoutVersion));
@@ -76,6 +80,14 @@ QByteArray Settings::loadPipelineCache()
     switch (version) {
     case PipelineCacheLayoutVersion::PLAIN:
         break;
+    case PipelineCacheLayoutVersion::COMPRESS_B64:
+        if (auto b64Result = QByteArray::fromBase64Encoding(result, QByteArray::Base64Option::AbortOnBase64DecodingErrors)) {
+            result = *b64Result;
+        } else {
+            qDebug() << "Failed to process base64";
+            result = {};
+        }
+        // Passthrough to next case
     case PipelineCacheLayoutVersion::COMPRESS:
         result = qUncompress(result);
         break;

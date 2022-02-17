@@ -173,6 +173,7 @@ set(PROJECT_SOURCES
     texpipeline.cpp texpipeline.h
     colorpipeline.cpp colorpipeline.h
     vkmemalloc.cpp vkmemalloc.h
+    objectwithallocation.cpp objectwithallocation.h
 )
 
 add_resources(GENERATED_SOURCES "${resources}")

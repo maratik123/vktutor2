@@ -60,10 +60,10 @@ BufferWithAllocation VulkanRenderer::createBuffer(Iterator begin, Iterator end, 
     auto deviceBuffer = createBuffer(bufferSize, VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
                                                  VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
     try {
-        copyBuffer(stagingBuffer.buffer, deviceBuffer.buffer, bufferSize);
+        copyBuffer(stagingBuffer.object, deviceBuffer.object, bufferSize);
 
         return deviceBuffer;
-    } catch(...) {
+    } catch (...) {
         vmaUnmapMemory(m_allocator, deviceBuffer.allocation);
         throw;
     }
@@ -71,5 +71,5 @@ BufferWithAllocation VulkanRenderer::createBuffer(Iterator begin, Iterator end, 
 
 template BufferWithAllocation VulkanRenderer::createVertexBuffer(const QVector<TexVertex> &vertices) const;
 template BufferWithAllocation VulkanRenderer::createIndexBuffer(const QVector<uint32_t> &indices) const;
-template BufferWithAllocation VulkanRenderer::createVertexBuffer(const std::array<ColorVertex, 8> &vertices) const;
-template BufferWithAllocation VulkanRenderer::createIndexBuffer(const std::array<uint16_t, 36> &indices) const;
+template BufferWithAllocation VulkanRenderer::createVertexBuffer(const std::array<ColorVertex, 14> &vertices) const;
+template BufferWithAllocation VulkanRenderer::createIndexBuffer(const std::array<uint16_t, 72> &indices) const;

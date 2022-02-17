@@ -70,6 +70,20 @@ void TexPipeline::initSwapChainResources()
     m_graphicsPipelineWithLayout = createGraphicsPipeline();
 }
 
+QVector<BufferWithAllocation *> TexPipeline::allocations()
+{
+    QVector<BufferWithAllocation *> result{};
+    result.reserve(2 + m_vertUniformBuffers.size() + m_fragUniformBuffers.size());
+    result << &m_vertexBuffer << &m_indexBuffer;
+    for (auto &buffer : m_vertUniformBuffers) {
+        result << &buffer;
+    }
+    for (auto &buffer : m_fragUniformBuffers) {
+        result << &buffer;
+    }
+    return result;
+}
+
 DescriptorPoolSizes TexPipeline::descriptorPoolSizes(int swapChainImageCount) const
 {
     return {
@@ -119,8 +133,8 @@ void TexPipeline::updateUniformBuffers(float time, const QSize &swapChainImageSi
         glm::mat4 modelDiffuseLightPos = glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F});
 
         fragUbo->ambientColor = {0.01F, 0.01F, 0.01F, 1.0F};
-        fragUbo->diffuseLightPos = modelDiffuseLightPos * glm::vec4{-0.7F, 0.7F, 1.0F, 1.0F};
-        fragUbo->diffuseLightColor = {1.0F, 1.0F, 0.0F, 1.0F};
+        fragUbo->diffuseLightPos = modelDiffuseLightPos * glm::vec4{-0.7F, 0.7F, 1.2F, 1.0F};
+        fragUbo->diffuseLightColor = {1.0F, 1.0F, 0.5F, 1.0F};
     }
 }
 
@@ -129,13 +143,13 @@ void TexPipeline::drawCommands(VkCommandBuffer commandBuffer, int currentSwapCha
     auto *devFuncs = vulkanRenderer()->devFuncs();
     devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithLayout.pipeline);
 
-    std::array vertexBuffers{m_vertexBuffer.buffer};
+    std::array vertexBuffers{m_vertexBuffer.object};
     std::array offsets{static_cast<VkDeviceSize>(0)};
     devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
 
     devFuncs->vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithLayout.layout, 0,
                                         1, &m_descriptorSets.at(currentSwapChainImageIndex), 0, nullptr);
-    devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT32);
+    devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.object, 0, VkIndexType::VK_INDEX_TYPE_UINT32);
 
     devFuncs->vkCmdDrawIndexed(commandBuffer, m_indices.size(), 1, 0, 0, 0);
 }
@@ -373,7 +387,7 @@ void TexPipeline::createDescriptorSets(QVector<VkDescriptorSet> &descriptorSets)
          && iDescriptorSets != descriptorSets.cend();
          ++iVertUniformBuffers, ++iFragUniformBuffers, ++iDescriptorSets) {
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = iVertUniformBuffers->buffer;
+        bufferInfo.buffer = iVertUniformBuffers->object;
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(VertBindingObject);
 
@@ -383,7 +397,7 @@ void TexPipeline::createDescriptorSets(QVector<VkDescriptorSet> &descriptorSets)
         imageInfo.sampler = m_textureSampler;
 
         VkDescriptorBufferInfo lightInfoBufferInfo{};
-        lightInfoBufferInfo.buffer = iFragUniformBuffers->buffer;
+        lightInfoBufferInfo.buffer = iFragUniformBuffers->object;
         lightInfoBufferInfo.offset = 0;
         lightInfoBufferInfo.range = sizeof(FragBindingObject);
 
@@ -480,9 +494,9 @@ void TexPipeline::createTextureImage()
 
     m_textureImage = vulkanRenderer()->createImage(texWidth, texHeight, m_mipLevels, VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
                                                    textureFormat, VkImageTiling::VK_IMAGE_TILING_OPTIMAL, usage, VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
-    vulkanRenderer()->transitionImageLayout(m_textureImage.image, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_mipLevels);
-    vulkanRenderer()->copyBufferToImage(stagingBuffer.buffer, m_textureImage.image, texWidth, texHeight);
-    vulkanRenderer()->generateMipmaps(m_textureImage.image, textureFormat, texWidth, texHeight, m_mipLevels);
+    vulkanRenderer()->transitionImageLayout(m_textureImage.object, textureFormat, VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_mipLevels);
+    vulkanRenderer()->copyBufferToImage(stagingBuffer.object, m_textureImage.object, texWidth, texHeight);
+    vulkanRenderer()->generateMipmaps(m_textureImage.object, textureFormat, texWidth, texHeight, m_mipLevels);
 }
 
 void TexPipeline::createTextureSampler()
@@ -513,5 +527,5 @@ void TexPipeline::createTextureSampler()
 void TexPipeline::createTextureImageView()
 {
     qDebug() << "Create texture image view";
-    m_textureImageView = vulkanRenderer()->createImageView(m_textureImage.image, textureFormat, m_mipLevels);
+    m_textureImageView = vulkanRenderer()->createImageView(m_textureImage.object, textureFormat, m_mipLevels);
 }

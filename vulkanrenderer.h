@@ -5,30 +5,7 @@
 #include "vkmemalloc.h"
 
 #include "abstractpipeline.h"
-
-struct BufferWithAllocation
-{
-    VkBuffer buffer;
-    VmaAllocation allocation;
-
-    void destroy(VmaAllocator allocator)
-    {
-        vmaDestroyBuffer(allocator, buffer, allocation);
-        *this = {};
-    }
-};
-
-struct ImageWithAllocation
-{
-    VkImage image;
-    VmaAllocation allocation;
-
-    void destroy(VmaAllocator allocator)
-    {
-        vmaDestroyImage(allocator, image, allocation);
-        *this = {};
-    }
-};
+#include "objectwithallocation.h"
 
 struct PipelineWithLayout
 {
@@ -63,26 +40,27 @@ public:
     template<typename T, std::size_t Size>
     [[nodiscard]] BufferWithAllocation createIndexBuffer(const std::array<T, Size> &indices) const;
     static void checkVkResult(VkResult actualResult, const char *errorMessage, VkResult expectedResult = VkResult::VK_SUCCESS);
-    [[nodiscard]] QVulkanDeviceFunctions *devFuncs() const { return m_devFuncs; }
-    [[nodiscard]] VkDevice device() const { return m_device; }
     [[nodiscard]] static VkRect2D createVkRect2D(const QSize &rect);
     [[nodiscard]] ShaderModules createShaderModules(const QString &vertShaderName, const QString &fragShaderName) const;
     void destroyShaderModules(ShaderModules &shaderModules) const;
-    [[nodiscard]] QVulkanWindow *window() const { return m_window; }
-    [[nodiscard]] VkPipelineCache pipelineCache() const { return m_pipelineCache; }
     void destroyPipelineWithLayout(PipelineWithLayout &pipelineWithLayout) const;
-    [[nodiscard]] VkDescriptorPool descriptorPool() const { return m_descriptorPool; }
     template<typename T>
     void createUniformBuffers(QVector<BufferWithAllocation> &buffers) const { createUniformBuffers(buffers, sizeof(T)); }
     void destroyUniformBuffers(QVector<BufferWithAllocation> &buffers) const;
     [[nodiscard]] BufferWithAllocation createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const;
-    [[nodiscard]] ImageWithAllocation createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
+    [[nodiscard]] ObjectWithAllocation<VkImage> createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
                                                   VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage) const;
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) const;
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) const;
     void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) const;
     [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format, uint32_t mipLevels) const;
+
     [[nodiscard]] VmaAllocator allocator() const { return m_allocator; }
+    [[nodiscard]] QVulkanDeviceFunctions *devFuncs() const { return m_devFuncs; }
+    [[nodiscard]] VkDevice device() const { return m_device; }
+    [[nodiscard]] QVulkanWindow *window() const { return m_window; }
+    [[nodiscard]] VkPipelineCache pipelineCache() const { return m_pipelineCache; }
+    [[nodiscard]] VkDescriptorPool descriptorPool() const { return m_descriptorPool; }
 
 private:
     std::array<std::unique_ptr<AbstractPipeline>, 2> m_pipelines;

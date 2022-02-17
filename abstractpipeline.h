@@ -5,6 +5,8 @@ class VulkanRenderer;
 
 #include <QVulkanInstance>
 #include <QHash>
+#include <QVector>
+#include <objectwithallocation.h>
 
 struct DescriptorPoolSizes
 {
@@ -27,6 +29,7 @@ public:
     virtual void preInitResources() = 0;
     virtual void initResources() = 0;
     virtual void initSwapChainResources() = 0;
+    [[nodiscard]] virtual QVector<BufferWithAllocation *> allocations() = 0;
     [[nodiscard]] virtual DescriptorPoolSizes descriptorPoolSizes(int swapChainImageCount) const = 0;
     virtual void updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const = 0;
     virtual void drawCommands(VkCommandBuffer commandBuffer, int currentSwapChainImageIndex) const = 0;

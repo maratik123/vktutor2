@@ -7,8 +7,9 @@
 
 namespace {
 const glm::vec3 lightCubeColor{1.0F, 1.0F, 0.0F};
+const glm::vec3 lightCubeCenterColor{1.0F, 1.0F, 1.0F};
 
-const std::array<ColorVertex, 8> lightCubeVertices{
+const std::array<ColorVertex, 14> lightCubeVertices{
     ColorVertex{{-0.5F, -0.5F, 0.5F}, lightCubeColor},
     ColorVertex{{0.5F, -0.5F, 0.5F}, lightCubeColor},
     ColorVertex{{0.5F, 0.5F, 0.5F}, lightCubeColor},
@@ -16,15 +17,21 @@ const std::array<ColorVertex, 8> lightCubeVertices{
     ColorVertex{{-0.5F, -0.5F, -0.5F}, lightCubeColor},
     ColorVertex{{0.5F, -0.5F, -0.5F}, lightCubeColor},
     ColorVertex{{0.5F, 0.5F, -0.5F}, lightCubeColor},
-    ColorVertex{{-0.5F, 0.5F, -0.5F}, lightCubeColor}
+    ColorVertex{{-0.5F, 0.5F, -0.5F}, lightCubeColor},
+    ColorVertex{{0.0F, 0.0F, 0.5F}, lightCubeCenterColor},
+    ColorVertex{{0.0F, 0.0F, -0.5F}, lightCubeCenterColor},
+    ColorVertex{{0.0F, 0.5F, 0.0F}, lightCubeCenterColor},
+    ColorVertex{{0.0F, -0.5F, 0.0F}, lightCubeCenterColor},
+    ColorVertex{{0.5F, 0.0F, 0.0F}, lightCubeCenterColor},
+    ColorVertex{{-0.5F, 0.0F, 0.0F}, lightCubeCenterColor}
 };
-constexpr std::array<uint16_t, 36> lightCubeIndices{
-    0, 1, 2, 2, 3, 0,
-    6, 5, 4, 4, 7, 6,
-    4, 0, 3, 3, 7, 4,
-    2, 1, 5, 5, 6, 2,
-    7, 3, 2, 2, 6, 7,
-    1, 0, 4, 4, 5, 1
+constexpr std::array<uint16_t, 72> lightCubeIndices{
+    0, 1, 8, 1, 2, 8, 2, 3, 8, 3, 0, 8,
+    6, 5, 9, 5, 4, 9, 4, 7, 9, 7, 6, 9,
+    4, 0, 13, 0, 3, 13, 3, 7, 13, 7, 4, 13,
+    2, 1, 12, 1, 5, 12, 5, 6, 12, 6, 2, 12,
+    7, 3, 10, 3, 2, 10, 2, 6, 10, 6, 7, 10,
+    1, 0, 11, 0, 4, 11, 4, 5, 11, 5, 1, 11
 };
 
 const QString colorVertShaderName = QStringLiteral(":/shaders/color.vert.spv");
@@ -67,6 +74,17 @@ void ColorPipeline::initSwapChainResources()
     m_graphicsPipelineWithLayout = createGraphicsPipeline();
 }
 
+QVector<BufferWithAllocation *> ColorPipeline::allocations()
+{
+    QVector<BufferWithAllocation *> result{};
+    result.reserve(2 + m_vertUniformBuffers.size());
+    result << &m_vertexBuffer << &m_indexBuffer;
+    for (auto &buffer : m_vertUniformBuffers) {
+        result << &buffer;
+    }
+    return result;
+}
+
 DescriptorPoolSizes ColorPipeline::descriptorPoolSizes(int swapChainImageCount) const
 {
     return {
@@ -90,7 +108,7 @@ void ColorPipeline::updateUniformBuffers(float time, const QSize &swapChainImage
                                   "failed to map uniform buffer object memory");
     auto mapGuard = sg::make_scope_guard([&]{ vmaUnmapMemory(allocator, vertUniformBufferAllocation); });
 
-    vertUbo->model = glm::scale(glm::translate(glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F}), glm::vec3{-0.7F, 0.7F, 1.0F}), glm::vec3{0.05F, 0.05F, 0.05F});
+    vertUbo->model = glm::scale(glm::translate(glm::rotate(glm::mat4{1.0F}, -time * glm::radians(30.0F), glm::vec3{0.0F, 0.0F, 1.0F}), glm::vec3{-0.7F, 0.7F, 1.2F}), glm::vec3{0.05F, 0.05F, 0.05F});
 
     auto aspect = static_cast<float>(swapChainImageSize.width()) / static_cast<float>(swapChainImageSize.height());
     vertUbo->projView = glm::perspective(glm::radians(45.0F), aspect, 0.1F, 10.0F);
@@ -106,13 +124,13 @@ void ColorPipeline::drawCommands(VkCommandBuffer commandBuffer, int currentSwapC
     auto *devFuncs = vulkanRenderer()->devFuncs();
     devFuncs->vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithLayout.pipeline);
 
-    std::array vertexBuffers{m_vertexBuffer.buffer};
+    std::array vertexBuffers{m_vertexBuffer.object};
     std::array offsets{static_cast<VkDeviceSize>(0)};
     devFuncs->vkCmdBindVertexBuffers(commandBuffer, 0, vertexBuffers.size(), vertexBuffers.data(), offsets.data());
 
     devFuncs->vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineWithLayout.layout, 0,
                                         1, &m_descriptorSets.at(currentSwapChainImageIndex), 0, nullptr);
-    devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.buffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
+    devFuncs->vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.object, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
 
     devFuncs->vkCmdDrawIndexed(commandBuffer, lightCubeIndices.size(), 1, 0, 0, 0);
 
@@ -189,7 +207,7 @@ void ColorPipeline::createDescriptorSets(QVector<VkDescriptorSet> &descriptorSet
          && iDescriptorSets != descriptorSets.cend();
          ++iVertUniformBuffers, ++iDescriptorSets) {
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = iVertUniformBuffers->buffer;
+        bufferInfo.buffer = iVertUniformBuffers->object;
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(VertBindingObject);
 

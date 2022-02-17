@@ -17,6 +17,7 @@ public:
     void preInitResources() override;
     void initResources() override;
     void initSwapChainResources() override;
+    [[nodiscard]] QVector<BufferWithAllocation *> allocations() override;
     [[nodiscard]] DescriptorPoolSizes descriptorPoolSizes(int swapChainImageCount) const override;
     void updateUniformBuffers(float time, const QSize &swapChainImageSize, int currentSwapChainImageIndex) const override;
     void drawCommands(VkCommandBuffer commandBuffer, int currentSwapChainImageIndex) const override;
@@ -34,7 +35,7 @@ private:
     VkDescriptorSetLayout m_descriptorSetLayout;
     QVector<BufferWithAllocation> m_vertUniformBuffers;
     QVector<BufferWithAllocation> m_fragUniformBuffers;
-    ImageWithAllocation m_textureImage;
+    ObjectWithAllocation<VkImage> m_textureImage;
     VkImageView m_textureImageView;
     VkSampler m_textureSampler;
     uint32_t m_mipLevels;

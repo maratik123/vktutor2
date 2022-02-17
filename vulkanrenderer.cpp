@@ -62,6 +62,16 @@ constexpr VkImageAspectFlags evalAspectFlags(VkImageLayout newLayout, VkFormat f
     }
     return VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT | VkImageAspectFlagBits::VK_IMAGE_ASPECT_STENCIL_BIT;
 }
+
+constexpr VkBufferCreateInfo createBufferInfo(VkDeviceSize size, VkBufferUsageFlags usage)
+{
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
+    return bufferInfo;
+}
 }
 
 VulkanRenderer::VulkanRenderer(QVulkanWindow *w)
@@ -86,8 +96,8 @@ void VulkanRenderer::preInitResources()
     qDebug() << "preInitResources";
     qDebug() << "Vulkan version: " << m_vkInst->apiVersion();
     m_window->setPreferredColorFormats({
-            VkFormat::VK_FORMAT_B8G8R8A8_SRGB,
-            VkFormat::VK_FORMAT_B8G8R8A8_UNORM
+        VkFormat::VK_FORMAT_B8G8R8A8_SRGB,
+        VkFormat::VK_FORMAT_B8G8R8A8_UNORM
     });
     {
         auto supportedSampleCounts = m_window->supportedSampleCounts();
@@ -116,8 +126,68 @@ void VulkanRenderer::initSwapChainResources()
     qDebug() << "initSwapChainResources";
     updateDepthResources();
     m_descriptorPool = createDescriptorPool();
+    QVector<BufferWithAllocation *> allObjectWithAllocations{};
     for (const auto &pipeline : m_pipelines) {
         pipeline->initSwapChainResources();
+        auto pipeAllocations = pipeline->allocations();
+        allObjectWithAllocations.reserve(allObjectWithAllocations.size() + pipeAllocations.size());
+        allObjectWithAllocations << pipeAllocations;
+    }
+    const auto allocCount = allObjectWithAllocations.size();
+    if (allocCount > 0) {
+        QVector<VmaAllocation> allocations{};
+        allocations.reserve(allocCount);
+        for (const auto &objectWithAllocation : qAsConst(allObjectWithAllocations)) {
+            allocations << objectWithAllocation->allocation;
+        }
+        QVector<VkBool32> allocationsChanged(allocCount);
+
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+        try {
+            VmaDefragmentationInfo2 defragInfo{};
+            defragInfo.allocationCount = allocCount;
+            defragInfo.pAllocations = allocations.data();
+            defragInfo.pAllocationsChanged = allocationsChanged.data();
+            defragInfo.maxCpuBytesToMove = VK_WHOLE_SIZE;
+            defragInfo.maxCpuAllocationsToMove = UINT32_MAX;
+            defragInfo.maxGpuBytesToMove = VK_WHOLE_SIZE;
+            defragInfo.maxGpuAllocationsToMove = UINT32_MAX;
+            defragInfo.commandBuffer = commandBuffer;
+
+            VmaDefragmentationContext defragCtx{};
+            VmaDefragmentationStats defragStats{};
+            checkVkResult(vmaDefragmentationBegin(m_allocator, &defragInfo, &defragStats, &defragCtx),
+                          "Unable to begin defragmentation");
+            auto guard = sg::make_scope_guard([&, this]{ checkVkResult(vmaDefragmentationEnd(m_allocator, defragCtx),
+                                                                       "Unable to end defragmentation"); });
+            auto guard2 = sg::make_scope_guard([&]{ commandBuffer = {}; });
+            qDebug() << "defrag: bytes moved: " << defragStats.bytesMoved
+                     << ", bytes freed: " << defragStats.bytesFreed
+                     << ", allocations moved: " << defragStats.allocationsMoved
+                     << ", device memory blocks freed: " << defragStats.deviceMemoryBlocksFreed;
+            endSingleTimeCommands(commandBuffer);
+        } catch (...) {
+            if (commandBuffer != nullptr) {
+                endSingleTimeCommands(commandBuffer);
+            }
+            throw;
+        }
+        for (int i = 0; i < allocCount; ++i) {
+            if (allocationsChanged[i] != VK_FALSE) {
+                auto &objectWithAllocation = *allObjectWithAllocations[i];
+                objectWithAllocation.allocation = allocations.at(i);
+                m_devFuncs->vkDestroyBuffer(m_device, objectWithAllocation.object, nullptr);
+
+                auto bufferInfo = createBufferInfo(objectWithAllocation.size, objectWithAllocation.usage);
+                checkVkResult(m_devFuncs->vkCreateBuffer(m_device, &bufferInfo, nullptr, &objectWithAllocation.object),
+                              "failed to create new buffer");
+                VmaAllocationInfo allocInfo{};
+                vmaGetAllocationInfo(m_allocator, objectWithAllocation.allocation, &allocInfo);
+                checkVkResult(vmaBindBufferMemory(m_allocator, objectWithAllocation.allocation, objectWithAllocation.object),
+                              "failed to bind buffer to allocation");
+            }
+        }
     }
 }
 
@@ -161,11 +231,11 @@ ShaderModules VulkanRenderer::createShaderModules(const QString &vertShaderName,
         shaderModules.frag = createShaderModule(fragShaderCode);
         try {
             return shaderModules;
-        } catch(...) {
+        } catch (...) {
             m_devFuncs->vkDestroyShaderModule(m_device, shaderModules.frag, nullptr);
             throw;
         }
-    } catch(...) {
+    } catch (...) {
         m_devFuncs->vkDestroyShaderModule(m_device, shaderModules.vert, nullptr);
         throw;
     }
@@ -371,28 +441,25 @@ void VulkanRenderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_
                                      1, &barrier);
 }
 
-
 BufferWithAllocation VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const
 {
     qDebug() << "Create buffer";
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VkSharingMode::VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = createBufferInfo(size, usage);
 
     VmaAllocationCreateInfo allocationInfo{};
     allocationInfo.usage = memoryUsage;
 
     BufferWithAllocation result{};
-    checkVkResult(vmaCreateBuffer(m_allocator, &bufferInfo, &allocationInfo, &result.buffer, &result.allocation, nullptr),
+    result.size = size;
+    result.usage = usage;
+    checkVkResult(vmaCreateBuffer(m_allocator, &bufferInfo, &allocationInfo, &result.object, &result.allocation, nullptr),
                   "failed to create buffer with allocation");
     return result;
 }
 
-ImageWithAllocation VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
-                                                VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage) const
+ObjectWithAllocation<VkImage> VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
+                                                          VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage) const
 {
     qDebug() << "Create image";
 
@@ -415,8 +482,8 @@ ImageWithAllocation VulkanRenderer::createImage(uint32_t width, uint32_t height,
     VmaAllocationCreateInfo allocationInfo{};
     allocationInfo.usage = memoryUsage;
 
-    ImageWithAllocation result{};
-    checkVkResult(vmaCreateImage(m_allocator, &imageInfo, &allocationInfo, &result.image, &result.allocation, nullptr),
+    ObjectWithAllocation<VkImage> result{};
+    checkVkResult(vmaCreateImage(m_allocator, &imageInfo, &allocationInfo, &result.object, &result.allocation, nullptr),
                   "failed to create image");
     return result;
 }
@@ -550,7 +617,7 @@ VkCommandBuffer VulkanRenderer::beginSingleTimeCommands() const
                       "failed to begin command buffer for copy");
 
         return commandBuffer;
-    } catch(...) {
+    } catch (...) {
         m_devFuncs->vkFreeCommandBuffers(m_device, commandPool, 1, &commandBuffer);
         throw;
     }
@@ -711,7 +778,7 @@ VmaAllocator VulkanRenderer::createAllocator() const
     VmaAllocatorCreateInfo allocatorInfo{};
     auto vulkanVersion = m_vkInst->apiVersion();
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
-    allocatorInfo.vulkanApiVersion = VK_MAKE_API_VERSION(0, vulkanVersion.majorVersion(), vulkanVersion.minorVersion(), 0U);
+    allocatorInfo.vulkanApiVersion = VK_MAKE_API_VERSION(0, vulkanVersion.majorVersion(), vulkanVersion.minorVersion(), 0);
     allocatorInfo.physicalDevice = m_physDevice;
     allocatorInfo.device = m_device;
     allocatorInfo.instance = m_vkInst->vkInstance();
